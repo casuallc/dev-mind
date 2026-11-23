@@ -132,7 +132,8 @@ class TerminalSessionServiceTest {
             workspaceService = new TerminalWorkspaceService(identity, projectService,
                     new TerminalWorkspaceServiceTest.FakeRequirementService(), null, null,
                     sessionManager, TerminalWorkspaceServiceTest.twRepo(twStore),
-                    connectorProvider, JsonMapper.builder().build());
+                    connectorProvider, JsonMapper.builder().build(),
+                    new WorkspaceFinalizeCore(connectorProvider), null);
             service = new TerminalSessionService(workspaceService, tsRepo(tsStore), projectService,
                     sessionManager, connectorProvider, bridgeProvider, JsonMapper.builder().build());
         }

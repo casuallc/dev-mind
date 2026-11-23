@@ -153,7 +153,7 @@ class TerminalWorkspaceServiceTest {
 
         FakeSessionManager() {
             super(null, null, null, null, null, null, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         @Override
@@ -170,17 +170,41 @@ class TerminalWorkspaceServiceTest {
         }
     }
 
-    /** 可控 connector：terminalWorkspacePrepare 记录入参并可配置失败 */
+    /** 内存 terminal_sessions 仓（M3 收口/释放的「运行中会话」占用检查用） */
+    static com.devmind.session.repo.TerminalSessionRepository tsRepo(
+            Map<String, com.devmind.session.model.TerminalSessionEntity> store) {
+        return proxy(com.devmind.session.repo.TerminalSessionRepository.class, (p, m, args) ->
+                switch (m.getName()) {
+                    case "save" -> {
+                        com.devmind.session.model.TerminalSessionEntity e =
+                                (com.devmind.session.model.TerminalSessionEntity) args[0];
+                        store.put(e.getId(), e);
+                        yield e;
+                    }
+                    case "findByWorkspaceIdOrderByStartedAtDesc" -> store.values().stream()
+                            .filter(e -> args[0].equals(e.getWorkspaceId())).toList();
+                    default -> throw new UnsupportedOperationException(m.getName());
+                });
+    }
+
+    /** 可控 connector：terminalWorkspacePrepare 记录入参并可配置失败；M3 帧（finalize/release/query）可配结果 */
     static class Harness {
         final FakeIdentity identity = new FakeIdentity();
         final FakeProjectService projectService = new FakeProjectService();
         final FakeRequirementService requirementService = new FakeRequirementService();
         final FakeSessionManager sessionManager = new FakeSessionManager();
         final Map<String, TerminalWorkspaceEntity> twStore = new HashMap<>();
+        final Map<String, com.devmind.session.model.TerminalSessionEntity> tsStore = new HashMap<>();
         final TerminalWorkspaceService service;
 
         String prepareKey;
         String prepareError;
+        // M3 观察位
+        String finalizeError;         // 非 null → finalizeWorkspace 回 failed
+        String releaseError;          // 非 null → releaseWorkspace 回 failed
+        Map<String, Object> statusPayload = Map.of(); // workspace_query status 回包（默认干净）
+        String finalizedFrameSessionId;
+        String releasedKey;
 
         Harness() {
             AgentNodeConnector connector = proxy(AgentNodeConnector.class, (p, m, args) ->
@@ -196,13 +220,27 @@ class TerminalWorkspaceServiceTest {
                                                     : ((AgentLaunchCommand.RepoSpec) ((List<?>) args[4]).get(0)).branch(),
                                             List.of());
                         }
+                        case "finalizeWorkspace" -> {
+                            finalizedFrameSessionId = (String) args[1];
+                            yield finalizeError != null
+                                    ? com.devmind.common.agent.FinalizeResult.failed(finalizeError)
+                                    : com.devmind.common.agent.FinalizeResult.ok("merged app: 1 commit");
+                        }
+                        case "releaseWorkspace" -> {
+                            releasedKey = (String) args[1];
+                            yield releaseError != null
+                                    ? com.devmind.common.agent.WorkspaceReleaseResult.failed(releaseError)
+                                    : com.devmind.common.agent.WorkspaceReleaseResult.ok("removed");
+                        }
+                        case "workspaceQuery" -> com.devmind.common.agent.WorkspaceQueryResult.ok(statusPayload);
                         default -> throw new UnsupportedOperationException(m.getName());
                     });
             ObjectProvider<AgentNodeConnector> provider = proxy(ObjectProvider.class,
                     (p, m, args) -> "getIfAvailable".equals(m.getName()) ? connector : null);
             service = new TerminalWorkspaceService(identity, projectService, requirementService, null,
                     new WorktreeManager(new WorktreeProperties(), null), sessionManager,
-                    twRepo(twStore), provider, JsonMapper.builder().build());
+                    twRepo(twStore), provider, JsonMapper.builder().build(),
+                    new WorkspaceFinalizeCore(provider), tsRepo(tsStore));
         }
 
         TerminalWorkspaceEntity openRow(String key, String createdBy) {
@@ -392,12 +430,177 @@ class TerminalWorkspaceServiceTest {
 
         SessionManagerService sms = new SessionManagerService(null, null, null, null, null, null,
                 null, null, null, null, null, null, null, repo, null, null, null, null, null,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null);
         DevMindException ex = assertThrows(DevMindException.class,
                 () -> sms.precheckTerminalWorkspaceOccupancy("req-r1"));
         assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
         assertTrue(ex.getMessage().contains("u2"), "反向预检 409 应带占用方: " + ex.getMessage());
         sms.precheckTerminalWorkspaceOccupancy("req-r2"); // RELEASED 行不挡
         sms.precheckTerminalWorkspaceOccupancy(null);     // 空键不挡
+    }
+
+    // ---------------- M3 收口 / 释放 / 收口记录 ----------------
+
+    private static List<AgentLaunchCommand.RepoSpec> oneSpec() {
+        return List.of(new AgentLaunchCommand.RepoSpec(
+                "https://git.example.com/p/app.git", "main", "terminal/x", "tok", "app"));
+    }
+
+    @Test
+    void finalizeHappyPath() {
+        Harness h = new Harness();
+        TerminalWorkspaceEntity e = h.openRow("term-abc12345", "u1");
+        e.setLockOwner("u1");
+        e.setLockAt(Instant.now());
+        h.sessionManager.specs = oneSpec();
+
+        com.devmind.session.dto.FinalizeDetailView v = h.service.finalize(e.getId(),
+                new com.devmind.session.dto.TerminalFinalizeRequest("term-abc12345", null, null));
+
+        assertEquals(TerminalWorkspaceService.STATE_FINALIZED, v.workspaceState());
+        assertTrue(v.detail().contains("merged"), "收口明细应透传 runner 摘要: " + v.detail());
+        assertTrue(v.finalizedAt() != null);
+        assertEquals("term-abc12345", h.finalizedFrameSessionId,
+                "帧 sessionId 应为工作区键（审计按工作区键聚合）");
+        assertNull(e.getLockOwner(), "收口成功应清锁");
+        assertNull(e.getLockAt());
+        // 收口记录查看：与收口返回同一份明细
+        assertEquals(v.detail(), h.service.finalizeDetail(e.getId()).detail());
+    }
+
+    @Test
+    void finalizeConfirmCodeMismatchRejected() {
+        Harness h = new Harness();
+        TerminalWorkspaceEntity e = h.openRow("term-abc12345", "u1");
+        h.sessionManager.specs = oneSpec();
+        DevMindException ex = assertThrows(DevMindException.class, () -> h.service.finalize(e.getId(),
+                new com.devmind.session.dto.TerminalFinalizeRequest("term-xxxxxxxx", null, null)));
+        assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("term-abc12345"), "话术应提示正确确认码: " + ex.getMessage());
+        assertEquals(TerminalWorkspaceService.STATE_OPEN, e.getState(), "确认码不符不应落 FINALIZED");
+        assertNull(h.finalizedFrameSessionId, "确认码不符不应下发帧");
+    }
+
+    @Test
+    void finalizeNonOpenConflict() {
+        Harness h = new Harness();
+        TerminalWorkspaceEntity e = h.openRow("term-abc12345", "u1");
+        e.setState(TerminalWorkspaceService.STATE_FINALIZED);
+        h.sessionManager.specs = oneSpec();
+        DevMindException ex = assertThrows(DevMindException.class, () -> h.service.finalize(e.getId(),
+                new com.devmind.session.dto.TerminalFinalizeRequest("term-abc12345", null, null)));
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+    }
+
+    @Test
+    void finalizeForbiddenForOtherUserButAdminAllowed() {
+        Harness h = new Harness();
+        TerminalWorkspaceEntity e = h.openRow("term-abc12345", "u1");
+        h.sessionManager.specs = oneSpec();
+        h.identity.actor = "u2";
+        DevMindException ex = assertThrows(DevMindException.class, () -> h.service.finalize(e.getId(),
+                new com.devmind.session.dto.TerminalFinalizeRequest("term-abc12345", null, null)));
+        assertEquals(ErrorCode.FORBIDDEN, ex.getErrorCode());
+
+        h.identity.actor = "admin1";
+        h.identity.admin = true;
+        com.devmind.session.dto.FinalizeDetailView v = h.service.finalize(e.getId(),
+                new com.devmind.session.dto.TerminalFinalizeRequest("term-abc12345", null, null));
+        assertEquals(TerminalWorkspaceService.STATE_FINALIZED, v.workspaceState(), "管理员可收口他人终端工作区");
+    }
+
+    @Test
+    void finalizeForeignFreshLockConflict() {
+        Harness h = new Harness();
+        TerminalWorkspaceEntity e = h.openRow("term-abc12345", "u1");
+        h.sessionManager.specs = oneSpec();
+        e.setLockOwner("u2");
+        e.setLockAt(Instant.now());
+        DevMindException ex = assertThrows(DevMindException.class, () -> h.service.finalize(e.getId(),
+                new com.devmind.session.dto.TerminalFinalizeRequest("term-abc12345", null, null)));
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("u2"), "占用 409 应带占用方: " + ex.getMessage());
+
+        e.setLockAt(Instant.now().minusSeconds(120)); // 过期锁不挡
+        com.devmind.session.dto.FinalizeDetailView v = h.service.finalize(e.getId(),
+                new com.devmind.session.dto.TerminalFinalizeRequest("term-abc12345", null, null));
+        assertEquals(TerminalWorkspaceService.STATE_FINALIZED, v.workspaceState());
+    }
+
+    @Test
+    void finalizeRunningTerminalSessionConflict() {
+        Harness h = new Harness();
+        TerminalWorkspaceEntity e = h.openRow("term-abc12345", "u1");
+        h.sessionManager.specs = oneSpec();
+        com.devmind.session.model.TerminalSessionEntity ts =
+                new com.devmind.session.model.TerminalSessionEntity();
+        ts.setId("ts1");
+        ts.setWorkspaceId(e.getId());
+        ts.setState(TerminalSessionService.TerminalSessionState.RUNNING);
+        h.tsStore.put(ts.getId(), ts);
+
+        DevMindException ex = assertThrows(DevMindException.class, () -> h.service.finalize(e.getId(),
+                new com.devmind.session.dto.TerminalFinalizeRequest("term-abc12345", null, null)));
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("ts1"), "409 应带运行中会话 id: " + ex.getMessage());
+
+        ts.setState(TerminalSessionService.TerminalSessionState.CLOSED); // 关闭后放行
+        h.service.finalize(e.getId(),
+                new com.devmind.session.dto.TerminalFinalizeRequest("term-abc12345", null, null));
+        assertEquals(TerminalWorkspaceService.STATE_FINALIZED, e.getState());
+    }
+
+    @Test
+    void finalizeConnectorFailureKeepsOpen() {
+        Harness h = new Harness();
+        TerminalWorkspaceEntity e = h.openRow("term-abc12345", "u1");
+        h.sessionManager.specs = oneSpec();
+        h.finalizeError = "有未提交改动: a.txt、b.txt";
+        DevMindException ex = assertThrows(DevMindException.class, () -> h.service.finalize(e.getId(),
+                new com.devmind.session.dto.TerminalFinalizeRequest("term-abc12345", null, null)));
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("a.txt"), "runner 失败原因应透传: " + ex.getMessage());
+        assertEquals(TerminalWorkspaceService.STATE_OPEN, e.getState(), "收口失败工作区保留可重试");
+    }
+
+    @Test
+    void releaseDirtyRejectedThenDiscardAllowed() {
+        Harness h = new Harness();
+        TerminalWorkspaceEntity e = h.openRow("term-abc12345", "u1");
+        h.sessionManager.specs = oneSpec();
+        h.statusPayload = Map.of("repos", List.of(Map.of("name", "app",
+                "changes", List.of(Map.of("path", "src/a.txt"), Map.of("path", "b.md")))));
+
+        DevMindException ex = assertThrows(DevMindException.class,
+                () -> h.service.release(e.getId(), false));
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("src/a.txt"), "脏拒话术应列改动文件: " + ex.getMessage());
+        assertNull(h.releasedKey, "脏工作区默认不应下发释放帧");
+
+        TerminalWorkspaceView v = h.service.release(e.getId(), true);
+        assertEquals(TerminalWorkspaceService.STATE_RELEASED, v.state());
+        assertEquals("term-abc12345", h.releasedKey, "释放帧键应为工作区键");
+    }
+
+    @Test
+    void releaseAlreadyReleasedConflict() {
+        Harness h = new Harness();
+        TerminalWorkspaceEntity e = h.openRow("term-abc12345", "u1");
+        e.setState(TerminalWorkspaceService.STATE_RELEASED);
+        DevMindException ex = assertThrows(DevMindException.class,
+                () -> h.service.release(e.getId(), true));
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+    }
+
+    @Test
+    void releaseConnectorFailureKeepsOpen() {
+        Harness h = new Harness();
+        TerminalWorkspaceEntity e = h.openRow("term-abc12345", "u1");
+        h.sessionManager.specs = oneSpec();
+        h.releaseError = "worktree remove 失败";
+        DevMindException ex = assertThrows(DevMindException.class,
+                () -> h.service.release(e.getId(), true));
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertEquals(TerminalWorkspaceService.STATE_OPEN, e.getState(), "释放失败工作区保留可重试");
     }
 }

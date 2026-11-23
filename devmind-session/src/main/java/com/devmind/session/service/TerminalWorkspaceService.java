@@ -18,7 +18,9 @@ import com.devmind.session.dto.TerminalWorkspaceAttachRequest;
 import com.devmind.session.dto.TerminalWorkspaceCreateRequest;
 import com.devmind.session.dto.TerminalWorkspaceView;
 import com.devmind.session.model.SessionRepoEntity;
+import com.devmind.session.model.TerminalSessionEntity;
 import com.devmind.session.model.TerminalWorkspaceEntity;
+import com.devmind.session.repo.TerminalSessionRepository;
 import com.devmind.session.repo.TerminalWorkspaceRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,6 +71,10 @@ public class TerminalWorkspaceService {
     private final TerminalWorkspaceRepository terminalWorkspaceRepo;
     private final ObjectProvider<AgentNodeConnector> connectorProvider;
     private final ObjectMapper mapper;
+    /** M3：收口下发公共段（协议门控 + 帧下发 + 失败 409），与会话收口同口径 */
+    private final WorkspaceFinalizeCore finalizeCore;
+    /** M3：收口/释放前的「运行中终端会话」占用检查 */
+    private final TerminalSessionRepository terminalSessionRepo;
 
     public TerminalWorkspaceService(IdentityService identityService,
                                     ProjectService projectService,
@@ -78,7 +84,9 @@ public class TerminalWorkspaceService {
                                     SessionManagerService sessionManagerService,
                                     TerminalWorkspaceRepository terminalWorkspaceRepo,
                                     ObjectProvider<AgentNodeConnector> connectorProvider,
-                                    ObjectMapper mapper) {
+                                    ObjectMapper mapper,
+                                    WorkspaceFinalizeCore finalizeCore,
+                                    TerminalSessionRepository terminalSessionRepo) {
         this.identityService = identityService;
         this.projectService = projectService;
         this.requirementService = requirementService;
@@ -88,6 +96,8 @@ public class TerminalWorkspaceService {
         this.terminalWorkspaceRepo = terminalWorkspaceRepo;
         this.connectorProvider = connectorProvider;
         this.mapper = mapper;
+        this.finalizeCore = finalizeCore;
+        this.terminalSessionRepo = terminalSessionRepo;
     }
 
     // ---------------- 查询 ----------------
@@ -349,6 +359,206 @@ public class TerminalWorkspaceService {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    // ---------------- M3 收口 / 释放 / 收口记录 ----------------
+
+    /**
+     * M3 收口（<b>禁 @Transactional</b>——内含 WS 阻塞等 ack）：
+     * 归属（创建人/admin）→ OPEN 状态 → confirmCode 硬校验（=workspaceKey）→ 锁/运行中会话占用
+     * → repos_json 快照重建 specs → {@link WorkspaceFinalizeCore} 下发（帧 sessionId=workspaceKey，
+     * runner 审计按工作区键聚合）→ 成功落 FINALIZED + 收口明细 + 清锁。
+     * 脏工作区且未勾选丢弃时 runner 侧 409（dirtySummary 列前 3 个文件），透传不静默成功。
+     */
+    public com.devmind.session.dto.FinalizeDetailView finalize(String id,
+                                                               com.devmind.session.dto.TerminalFinalizeRequest req) {
+        TerminalWorkspaceEntity ent = require(id);
+        String actor = currentLoginUser();
+        if (ent.getCreatedBy() != null && !ent.getCreatedBy().equals(actor) && !isAdmin()) {
+            throw new DevMindException(ErrorCode.FORBIDDEN, "只有创建者或管理员可以收口终端工作区");
+        }
+        requireOpen(ent);
+        String confirmCode = req != null && req.confirmCode() != null ? req.confirmCode().trim() : "";
+        if (!ent.getWorkspaceKey().equals(confirmCode)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "确认码不符：请输入工作区键 " + ent.getWorkspaceKey() + " 以确认收口");
+        }
+        requireNoFreshForeignLock(ent, actor);
+        requireNoRunningTerminalSession(ent);
+        List<AgentLaunchCommand.RepoSpec> specs = buildSpecsFromSnapshot(ent);
+        com.devmind.common.integration.GitIdentityProvider.GitAuthor operator =
+                sessionManagerService.resolveGitAuthor(actor, projectService.requireProject(ent.getProjectId()));
+        com.devmind.common.agent.FinalizeResult result = finalizeCore.finalize(
+                ent.getAgentNodeId(), ent.getWorkspaceKey(), ent.getProjectId(), ent.getWorkspaceKey(),
+                ent.getOwner(), specs, operator,
+                req != null && Boolean.TRUE.equals(req.discardChanges()),
+                req != null && Boolean.TRUE.equals(req.deleteRemoteBranch()));
+        Instant now = Instant.now();
+        ent.setState(STATE_FINALIZED);
+        ent.setFinalizeDetail(result.detail());
+        ent.setFinalizedAt(now);
+        ent.setLockSessionId(null);
+        ent.setLockOwner(null);
+        ent.setLockAt(null);
+        ent.setLastActiveAt(now);
+        terminalWorkspaceRepo.save(ent);
+        log.info("终端工作区已收口: id={} key={} operator={}", id, ent.getWorkspaceKey(), actor);
+        return new com.devmind.session.dto.FinalizeDetailView(ent.getState(), ent.getFinalizeDetail(),
+                ent.getFinalizedAt());
+    }
+
+    /** M3 收口记录查看：未收口过返回 detail=null 的视图（对齐会话侧 finalizeDetail 语义）。 */
+    public com.devmind.session.dto.FinalizeDetailView finalizeDetail(String id) {
+        TerminalWorkspaceEntity ent = require(id);
+        return new com.devmind.session.dto.FinalizeDetailView(ent.getState(), ent.getFinalizeDetail(),
+                ent.getFinalizedAt());
+    }
+
+    /**
+     * M3 释放（丢弃语义：不合并不 push，runner 删 worktree + 本地分支）：
+     * 归属/占用校验同收口；<b>脏工作区默认拒绝</b>（workspace_query status 查 total.files>0 →
+     * 409 列前 3 个改动文件），显式 {@code discardChanges=true} 才放行下发 workspace_release。
+     * 成功落 RELEASED + 清锁。
+     */
+    public TerminalWorkspaceView release(String id, boolean discardChanges) {
+        TerminalWorkspaceEntity ent = require(id);
+        String actor = currentLoginUser();
+        if (ent.getCreatedBy() != null && !ent.getCreatedBy().equals(actor) && !isAdmin()) {
+            throw new DevMindException(ErrorCode.FORBIDDEN, "只有创建者或管理员可以释放终端工作区");
+        }
+        if (STATE_RELEASED.equals(ent.getState())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "终端工作区已释放，无需重复操作");
+        }
+        requireNoFreshForeignLock(ent, actor);
+        requireNoRunningTerminalSession(ent);
+        List<AgentLaunchCommand.RepoSpec> specs = buildSpecsFromSnapshot(ent);
+        AgentNodeConnector connector = requireConnector();
+        if (!discardChanges) {
+            precheckClean(connector, ent);
+        }
+        com.devmind.common.agent.WorkspaceReleaseResult result = connector.releaseWorkspace(
+                ent.getAgentNodeId(), ent.getWorkspaceKey(), ent.getProjectId(), ent.getOwner(),
+                specs, ent.getWorkspaceKey(), false);
+        if (!result.ok()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "清理失败（工作区已保留，可处理后重试）: " + result.error());
+        }
+        Instant now = Instant.now();
+        ent.setState(STATE_RELEASED);
+        ent.setLockSessionId(null);
+        ent.setLockOwner(null);
+        ent.setLockAt(null);
+        ent.setLastActiveAt(now);
+        log.info("终端工作区已释放: id={} key={} operator={} detail={}", id, ent.getWorkspaceKey(),
+                actor, result.detail());
+        return toView(terminalWorkspaceRepo.save(ent));
+    }
+
+    /** 他人持锁且 90s 内有续期 → 409（自己持锁/锁过期不挡收口与释放）。 */
+    private void requireNoFreshForeignLock(TerminalWorkspaceEntity ent, String actor) {
+        if (ent.getLockOwner() != null && !ent.getLockOwner().equals(actor)
+                && ent.getLockAt() != null
+                && ent.getLockAt().isAfter(Instant.now().minus(LOCK_FRESH))) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "终端工作区正被 " + ent.getLockOwner() + " 占用（90s 无心跳才允许抢占）");
+        }
+    }
+
+    /** 该工作区仍有 RUNNING 终端会话 → 409（避免合并/删除正在写的工作树）。 */
+    private void requireNoRunningTerminalSession(TerminalWorkspaceEntity ent) {
+        if (terminalSessionRepo == null) {
+            return;
+        }
+        for (TerminalSessionEntity ts : terminalSessionRepo.findByWorkspaceIdOrderByStartedAtDesc(ent.getId())) {
+            if (TerminalSessionService.TerminalSessionState.RUNNING.equals(ts.getState())) {
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "终端会话仍在运行中（" + ts.getId() + "），请先关闭终端再操作");
+            }
+        }
+    }
+
+    /**
+     * 释放前脏工作区预检（runner 的 release 是无条件 worktree remove --force，脏检查只能在服务端做）：
+     * workspace_query status 查回 total.files>0 → 409 列前 3 个改动路径；查询失败 fail-visible 409。
+     */
+    @SuppressWarnings("unchecked")
+    private void precheckClean(AgentNodeConnector connector, TerminalWorkspaceEntity ent) {
+        com.devmind.common.agent.WorkspaceQueryResult r = connector.workspaceQuery(
+                ent.getAgentNodeId(), ent.getWorkspaceKey(), "status", null, null);
+        if (!r.ok()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "工作区状态查询失败，无法确认无未提交改动（可勾选「丢弃未提交改动」强制释放）: "
+                            + (r.error() == null || r.error().isBlank() ? "未知原因" : r.error()));
+        }
+        List<String> dirty = new ArrayList<>();
+        Object repos = r.payload() == null ? null : r.payload().get("repos");
+        if (repos instanceof List<?> list) {
+            for (Object repo : list) {
+                if (!(repo instanceof Map<?, ?> rm)) {
+                    continue;
+                }
+                Object changes = rm.get("changes");
+                if (changes instanceof List<?> cl) {
+                    for (Object c : cl) {
+                        if (c instanceof Map<?, ?> cm && cm.get("path") != null) {
+                            dirty.add(String.valueOf(cm.get("path")));
+                        }
+                    }
+                }
+            }
+        }
+        if (!dirty.isEmpty()) {
+            String first = String.join("、", dirty.stream().limit(3).toList());
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "工作区存在未提交改动（" + dirty.size() + " 个文件，如 " + first + "），"
+                            + "请先提交或勾选「丢弃未提交改动」重试");
+        }
+    }
+
+    /** repos_json 快照 → 瞬态快照行 → 带凭据 specs（与创建同一条 buildRepoSpecs 链）。 */
+    private List<AgentLaunchCommand.RepoSpec> buildSpecsFromSnapshot(TerminalWorkspaceEntity ent) {
+        List<SessionRepoEntity> rows = deserializeSnapshot(ent.getReposJson());
+        List<AgentLaunchCommand.RepoSpec> specs = sessionManagerService.buildRepoSpecs(
+                projectService.requireProject(ent.getProjectId()), rows,
+                ent.getBaseBranch(), ent.getBranch(), ent.getCreatedBy());
+        if (specs.isEmpty()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "无可用远程仓库（未登记 remoteUrl 或凭据解析失败），无法下发工作区操作");
+        }
+        return specs;
+    }
+
+    /** repos_json 快照反序列化（serializeSnapshot 的逆；坏快照按空列表 → 后续 specs 空 409）。 */
+    @SuppressWarnings("unchecked")
+    private List<SessionRepoEntity> deserializeSnapshot(String reposJson) {
+        List<SessionRepoEntity> rows = new ArrayList<>();
+        if (reposJson == null || reposJson.isBlank()) {
+            return rows;
+        }
+        List<Map<String, Object>> data;
+        try {
+            data = mapper.readValue(reposJson, List.class);
+        } catch (Exception e) {
+            log.warn("终端工作区仓库快照解析失败: err={}", e.getMessage());
+            return rows;
+        }
+        for (Map<String, Object> m : data) {
+            SessionRepoEntity e = new SessionRepoEntity();
+            Object prid = m.get("projectRepoId");
+            if (prid instanceof Number n) {
+                e.setProjectRepoId(n.longValue());
+            }
+            e.setName((String) m.get("name"));
+            e.setRemoteUrl((String) m.get("remoteUrl"));
+            e.setLocalPath((String) m.get("localPath"));
+            e.setBaseBranch((String) m.get("baseBranch"));
+            e.setBranch((String) m.get("branch"));
+            e.setIsPrimary(Boolean.TRUE.equals(m.get("isPrimary")));
+            Object so = m.get("sortOrder");
+            e.setSortOrder(so instanceof Number n ? n.intValue() : 0);
+            rows.add(e);
+        }
+        return rows;
     }
 
     // ---------------- 内部 ----------------

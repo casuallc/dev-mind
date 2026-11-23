@@ -145,4 +145,30 @@ public class TerminalWorkspaceController {
                                                 @RequestParam(defaultValue = "50") int limit) {
         return terminalSessionService.history(id, limit);
     }
+
+    // ---------------- M3 收口 / 释放 / 收口记录 ----------------
+
+    /**
+     * M3 收口：confirmCode 服务端硬校验（=workspaceKey）→ runner ff-merge 基线 + push → FINALIZED。
+     * 脏工作区且未 discardChanges → 409 列前 3 个改动文件；锁/运行中终端会话占用 → 409。
+     */
+    @PostMapping("/{id}/finalize")
+    public com.devmind.session.dto.FinalizeDetailView finalize(
+            @PathVariable String id,
+            @RequestBody com.devmind.session.dto.TerminalFinalizeRequest req) {
+        return terminalWorkspaceService.finalize(id, req);
+    }
+
+    /** M3 收口记录查看（未收口过 detail=null）。 */
+    @GetMapping("/{id}/finalize-detail")
+    public com.devmind.session.dto.FinalizeDetailView finalizeDetail(@PathVariable String id) {
+        return terminalWorkspaceService.finalizeDetail(id);
+    }
+
+    /** M3 释放（丢弃语义）：脏工作区默认 409，discardChanges=true 强制；成功落 RELEASED。 */
+    @org.springframework.web.bind.annotation.DeleteMapping("/{id}")
+    public TerminalWorkspaceView release(@PathVariable String id,
+                                         @RequestParam(defaultValue = "false") boolean discardChanges) {
+        return terminalWorkspaceService.release(id, discardChanges);
+    }
 }

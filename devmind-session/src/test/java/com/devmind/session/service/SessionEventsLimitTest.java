@@ -100,7 +100,7 @@ class SessionEventsLimitTest {
         return new SessionManagerService(null, null, null, null, null, null, null,
                 e -> { }, new DomainEventPublisher(e -> { }),
                 repo, eventRepo, null, null, null, saver, props, JsonMapper.builder().build(),
-                connectorProvider, null, null, null, null, null, null, null);
+                connectorProvider, null, null, null, null, null, null, null, null);
     }
 
     @Test

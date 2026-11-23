@@ -117,7 +117,7 @@ class SessionManagerListPageTest {
         return new SessionManagerService(null, null, null, null, null, null, null,
                 e -> { }, new DomainEventPublisher(msg -> { }),
                 repo, eventRepo, null, sessionRepoRepo, null, saver, props, JsonMapper.builder().build(),
-                connectorProvider, null, null, null, null, null, null, null);
+                connectorProvider, null, null, null, null, null, null, null, null);
     }
 
     private static Map<String, SessionEntity> storeOf(SessionEntity... sessions) {

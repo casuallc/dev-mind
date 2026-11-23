@@ -99,6 +99,10 @@ public class TerminalWorkspaceEntity {
     @Column(name = "last_active_at")
     private Instant lastActiveAt;
 
+    /** M3 闲置提醒最近发送时刻（每 24h 最多提醒一次的去重依据；null = 未提醒过） */
+    @Column(name = "reminded_at")
+    private Instant remindedAt;
+
     @Column(name = "created_by", length = 64)
     private String createdBy;
 
@@ -139,6 +143,8 @@ public class TerminalWorkspaceEntity {
     public void setFinalizedAt(Instant finalizedAt) { this.finalizedAt = finalizedAt; }
     public Instant getLastActiveAt() { return lastActiveAt; }
     public void setLastActiveAt(Instant lastActiveAt) { this.lastActiveAt = lastActiveAt; }
+    public Instant getRemindedAt() { return remindedAt; }
+    public void setRemindedAt(Instant remindedAt) { this.remindedAt = remindedAt; }
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public Instant getCreatedAt() { return createdAt; }

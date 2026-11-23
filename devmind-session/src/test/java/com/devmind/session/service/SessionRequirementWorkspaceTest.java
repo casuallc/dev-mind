@@ -309,7 +309,8 @@ class SessionRequirementWorkspaceTest {
                 new WorktreeManager(new WorktreeProperties(), null), null, null,
                 e -> { }, new DomainEventPublisher(ev -> { }),
                 repo, eventRepo, null, repoRowRepo, null, saver, props, JsonMapper.builder().build(),
-                connectorProvider, null, gatewayProvider, null, TX, null, null, null);
+                connectorProvider, null, gatewayProvider, null, TX, null, null, null,
+                new WorkspaceFinalizeCore(connectorProvider));
         return service;
     }
 

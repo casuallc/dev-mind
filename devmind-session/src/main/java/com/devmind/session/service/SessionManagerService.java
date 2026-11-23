@@ -148,6 +148,8 @@ public class SessionManagerService {
     private final ObjectProvider<AttachmentContentResolver> attachmentResolverProvider;
     /** 逐回合用量账本（devmind-usage 装配时可用；未装配时只记累计列） */
     private final ObjectProvider<UsageRecordSink> usageRecordSinkProvider;
+    /** CAP-115 M3：收口下发公共段（协议门控 + specs 校验 + 阻塞等 ack），会话/终端工作区共用 */
+    private final WorkspaceFinalizeCore workspaceFinalizeCore;
 
     /** 运行中会话注册表（本地/远程统一句柄）。 */
     private final Map<String, SessionHandle> runtimes = new ConcurrentHashMap<>();
@@ -176,7 +178,8 @@ public class SessionManagerService {
                                  PlatformTransactionManager txManager,
                                  SessionOutputService outputService,
                                  ObjectProvider<AttachmentContentResolver> attachmentResolverProvider,
-                                 ObjectProvider<UsageRecordSink> usageRecordSinkProvider) {
+                                 ObjectProvider<UsageRecordSink> usageRecordSinkProvider,
+                                 WorkspaceFinalizeCore workspaceFinalizeCore) {
         this.identityService = identityService;
         this.projectService = projectService;
         this.workItemService = workItemService;
@@ -202,6 +205,7 @@ public class SessionManagerService {
         this.outputService = outputService;
         this.attachmentResolverProvider = attachmentResolverProvider;
         this.usageRecordSinkProvider = usageRecordSinkProvider;
+        this.workspaceFinalizeCore = workspaceFinalizeCore;
     }
 
     private final RuntimeListener listener = new RuntimeListener() {
@@ -1052,8 +1056,6 @@ public class SessionManagerService {
         if (ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
             throw new DevMindException(ErrorCode.CONFLICT, "历史本机会话（无执行节点）不可收口");
         }
-        AgentNodeConnector connector = requireConnector();
-        requireWorkspaceProtocol(connector, ent.getAgentNodeId(), ent.getWorkspaceKey());
         Project proj = resolveProject(ent.getProjectId());
         List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(proj,
                 sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(id), ent.getBaseBranch(),
@@ -1066,13 +1068,10 @@ public class SessionManagerService {
         // CAP-24 FR-06：收口 merge 提交署名 = 操作者绑定身份（null = 帧不带身份字段，
         // runner 回退内置 devmind 署名；老 runner 忽略字段同样回退，双向兼容）
         GitAuthor operator = resolveGitAuthor(identityService.currentActor(), proj);
-        FinalizeResult result = connector.finalizeWorkspace(ent.getAgentNodeId(), id,
-                ent.getProjectId(), wsOwner, specs, discardChanges, ent.getWorkspaceKey(), operator,
-                deleteRemoteBranch);
-        if (!result.ok()) {
-            throw new DevMindException(ErrorCode.CONFLICT,
-                    "收口失败（工作区已保留，可处理后重试）: " + result.error());
-        }
+        // CAP-115 M3：协议门控 + 帧下发 + 失败 409 统一收敛到 WorkspaceFinalizeCore
+        FinalizeResult result = workspaceFinalizeCore.finalize(ent.getAgentNodeId(), id,
+                ent.getProjectId(), ent.getWorkspaceKey(), wsOwner, specs, operator,
+                discardChanges, deleteRemoteBranch);
         // 收口留痕：明细（含并入基线的提交清单与变更统计，runner 采集）落目标会话行供事后查看。
         // 需求级收口的兄弟会话只置状态不落明细——查看时任意会话都能定位到代表行的明细。
         Instant finalizedAt = Instant.now();
@@ -1747,8 +1746,9 @@ public class SessionManagerService {
      * 用户在主库 remoteUrl host 的个人凭证署名 → 回退 displayName/username（仅 name）。
      * SPI 未装配/无项目/解析失败均返回 null（调用方各自降级：create 不注入 env，
      * 收口帧不带身份字段 → runner 回退内置 devmind 署名）。
+     * package-private 供 CAP-115 终端工作区收口复用同口径署名解析。
      */
-    private GitAuthor resolveGitAuthor(String username, Project project) {
+    GitAuthor resolveGitAuthor(String username, Project project) {
         GitIdentityProvider provider = gitIdentityProvider != null ? gitIdentityProvider.getIfAvailable() : null;
         if (provider == null || username == null || username.isBlank()) {
             return null;
@@ -2043,18 +2043,11 @@ public class SessionManagerService {
      * CAP-51 FR-09 协议门控（创建/resume/收口/释放共用）：<b>带 workspaceKey</b> 时要求 v10+
      * （老 runner 忽略该字段会落回 {@code work/} 旧布局，把不同需求写进同一目录，故属「必须认识」）；
      * <b>缺 key</b> 时退回 CAP-42 的 v7 门控（存量会话旧布局，字段缺席 = 旧语义，见 FR-11）。
+     * CAP-115 M3：实现收敛到 {@link WorkspaceFinalizeCore}（终端工作区收口同口径）。
      */
     private static void requireWorkspaceProtocol(AgentNodeConnector connector, String nodeId,
                                                  String workspaceKey) {
-        boolean keyed = workspaceKey != null && !workspaceKey.isBlank();
-        if (keyed && !connector.supports(nodeId, AgentProtocol.REQUIREMENT_WORKSPACE)) {
-            throw new DevMindException(ErrorCode.CONFLICT,
-                    "节点 runner 版本过低，不支持需求粒度工作区（需协议 v10+），请升级该节点 runner");
-        }
-        if (!keyed && !connector.supports(nodeId, AgentProtocol.PER_USER_WORKSPACE)) {
-            throw new DevMindException(ErrorCode.CONFLICT,
-                    "节点 runner 版本过低，不支持每用户固定工作区（需协议 v7+），请升级该节点 runner");
-        }
+        WorkspaceFinalizeCore.requireWorkspaceProtocol(connector, nodeId, workspaceKey);
     }
 
     /**
