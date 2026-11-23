@@ -27,6 +27,7 @@ import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.TerminalCompleteResult;
 import com.devmind.common.agent.TerminalExecResult;
 import com.devmind.common.agent.TerminalWsPrepareResult;
+import com.devmind.common.agent.WorkspaceFileWriteResult;
 import com.devmind.common.agent.WorkspaceQueryResult;
 import com.devmind.common.agent.WorkspaceReleaseResult;
 import com.devmind.common.agent.WorkspaceStatusListener;
@@ -123,6 +124,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private record TerminalWsPrepareWaiter(String nodeId, CompletableFuture<TerminalWsPrepareResult> done) {
     }
 
+    /** CAP-115 M2 workspace_file_write 等待者：带 nodeId 供断连时批量失败。 */
+    private record WorkspaceFileWriteWaiter(String nodeId, CompletableFuture<WorkspaceFileWriteResult> done) {
+    }
+
     private final AgentNodeService nodeService;
     private final AgentProperties props;
     private final ObjectMapper mapper;
@@ -164,6 +169,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final Map<String, VerifyWaiter> pendingVerifies = new ConcurrentHashMap<>();
     /** requestId → terminal_ws_prepare 等待者（CAP-115 终端工作区物化） */
     private final Map<String, TerminalWsPrepareWaiter> pendingTerminalWsPrepares = new ConcurrentHashMap<>();
+    /** requestId → workspace_file_write 等待者（CAP-115 M2 终端工作区文件直写） */
+    private final Map<String, WorkspaceFileWriteWaiter> pendingWorkspaceFileWrites = new ConcurrentHashMap<>();
 
     public AgentConnectionRegistry(AgentNodeService nodeService, AgentProperties props,
                                    ObjectMapper mapper, ObjectProvider<AgentEventListener> listenerProvider,
@@ -288,6 +295,13 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
                 e.getValue().done().complete(TerminalWsPrepareResult.failed("节点断连，终端工作区物化中断"));
             }
         }
+        // CAP-115 M2：断线即失败该节点进行中的终端工作区文件直写（ack 不会再来）
+        for (Map.Entry<String, WorkspaceFileWriteWaiter> e : pendingWorkspaceFileWrites.entrySet()) {
+            if (e.getValue().nodeId().equals(nodeId)
+                    && pendingWorkspaceFileWrites.remove(e.getKey(), e.getValue())) {
+                e.getValue().done().complete(WorkspaceFileWriteResult.failed("节点断连，文件写入中断"));
+            }
+        }
         // CAP-30：事件广播（原 getIfAvailable 单实现，chat 加入后有多实现）——各 bridge
         // 按「自己是否持有该 sessionId 的运行时」自行忽略未命中帧
         listenerProvider.forEach(l -> l.onAgentDisconnected(nodeId));
@@ -391,6 +405,19 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             w.done().complete(ok
                     ? TerminalWsPrepareResult.ok(path, branch, repos == null ? List.of() : repos)
                     : TerminalWsPrepareResult.failed(error));
+        }
+    }
+
+    /** CAP-115 M2：workspace_file_write_ack 上行帧 → 完成等待 future。 */
+    public void onWorkspaceFileWriteAck(String nodeId, String requestId, boolean ok,
+                                        String path, String sha, boolean conflict, String error) {
+        touch(nodeId);
+        WorkspaceFileWriteWaiter w = pendingWorkspaceFileWrites.remove(requestId);
+        if (w != null) {
+            w.done().complete(ok
+                    ? WorkspaceFileWriteResult.ok(path, sha)
+                    : conflict ? WorkspaceFileWriteResult.conflict(sha)
+                            : WorkspaceFileWriteResult.failed(error));
         }
     }
 
@@ -1332,6 +1359,64 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             throw new DevMindException(ErrorCode.CONFLICT, "终端工作区物化下发异常: " + e.getMessage(), e);
         } finally {
             pendingTerminalWsPrepares.remove(requestId);
+        }
+    }
+
+    /**
+     * CAP-115 M2：下发 workspace_file_write 帧并阻塞等 workspace_file_write_ack（镜像
+     * terminal_ws_prepare 等待模式）——runner 对终端工作区内单文件做全文直写（resolveConfined
+     * 双约束在 runner 侧，越界即拒）。协议门控同 v26。文件写入属秒级操作，等待上限 60 秒。
+     */
+    @Override
+    public WorkspaceFileWriteResult workspaceFileWrite(String nodeId, String workspaceKey,
+                                                       String projectId, String workspaceOwner,
+                                                       String path, String contentBase64,
+                                                       String expectedSha) {
+        WebSocketSession ws = requireConnection(nodeId);
+        if (!supports(nodeId, AgentProtocol.WORKSPACE_FILE_WRITE)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 runner 协议版本过低（终端工作区文件写入需 v"
+                            + AgentProtocol.WORKSPACE_FILE_WRITE + "+），请到节点页升级 runner");
+        }
+        requireKeyProtocol(nodeId, workspaceKey, "终端工作区文件写入");
+        String requestId = "wfw-" + System.currentTimeMillis() + "-" + workspaceKey;
+        CompletableFuture<WorkspaceFileWriteResult> done = new CompletableFuture<>();
+        pendingWorkspaceFileWrites.put(requestId, new WorkspaceFileWriteWaiter(nodeId, done));
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "workspace_file_write");
+        frame.put("requestId", requestId);
+        frame.put("sessionId", workspaceKey); // 伪会话 id：runner 侧按终端绑定解析工作区目录
+        frame.put("workspaceKey", workspaceKey);
+        frame.put("projectId", projectId);
+        frame.put("workspaceOwner", workspaceOwner);
+        frame.put("path", path);
+        frame.put("contentBase64", contentBase64);
+        if (expectedSha != null && !expectedSha.isBlank()) {
+            frame.put("expectedSha", expectedSha);
+        }
+        long startMs = System.currentTimeMillis();
+        try {
+            send(ws, frame);
+            WorkspaceFileWriteResult r = done.get(60, TimeUnit.SECONDS);
+            auditCommand("WS_FILE_WRITE", nodeId, workspaceKey, r.ok() && !r.conflict(), startMs,
+                    "key=" + workspaceKey + " path=" + path
+                            + (r.error() != null ? " err=" + r.error() : "")
+                            + (r.conflict() ? " sha 乐观锁冲突" : ""));
+            return r;
+        } catch (DevMindException e) {
+            throw e;
+        } catch (java.util.concurrent.TimeoutException e) {
+            WorkspaceFileWriteResult r = WorkspaceFileWriteResult.failed(
+                    "等待 runner workspace_file_write_ack 超时（runner 无响应）");
+            auditCommand("WS_FILE_WRITE", nodeId, workspaceKey, false, startMs,
+                    "path=" + path + " err=" + r.error());
+            return r;
+        } catch (Exception e) {
+            auditCommand("WS_FILE_WRITE", nodeId, workspaceKey, false, startMs,
+                    "path=" + path + " 下发异常: " + e.getMessage());
+            throw new DevMindException(ErrorCode.CONFLICT, "终端工作区文件写入下发异常: " + e.getMessage(), e);
+        } finally {
+            pendingWorkspaceFileWrites.remove(requestId);
         }
     }
 

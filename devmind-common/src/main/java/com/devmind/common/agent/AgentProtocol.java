@@ -83,7 +83,8 @@ package com.devmind.common.agent;
      * v26 = CAP-115 终端工作区（terminal_ws_prepare 帧：服务端下发 workspaceKey/repos
      * 请求 runner 幂等物化 worktrees/term-<id> 键控工作区并回 ack{path,branch}；
      * 老 runner 不认识该帧会静默忽略，服务端空等超时，故属「必须认识」需门控，409
-     * 话术引导升级 runner）。</p>
+     * 话术引导升级 runner。M2 追加 workspace_file_write 帧（终端工作区文件直写：
+     * path/contentBase64/expectedSha，ack{ok,sha} 或 409 sha 不符），同帧同门控）。</p>
  */
 public final class AgentProtocol {
 
@@ -176,6 +177,9 @@ public final class AgentProtocol {
 
     /** CAP-115 终端工作区（terminal_ws_prepare/terminal_ws_prepare_ack 帧：幂等物化 term-<id> 键控工作区）所需最低版本 */
     public static final int TERMINAL_WS_PREPARE = 26;
+
+    /** CAP-115 M2 终端工作区文件直写（workspace_file_write/workspace_file_write_ack 帧）所需最低版本（同 v26 门控） */
+    public static final int WORKSPACE_FILE_WRITE = 26;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

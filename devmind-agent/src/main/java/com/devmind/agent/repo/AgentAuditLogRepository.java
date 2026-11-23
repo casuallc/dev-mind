@@ -35,4 +35,8 @@ public interface AgentAuditLogRepository extends JpaRepository<AgentAuditLogEnti
 
     /** 保留期清理：删除早于 cutoff 的行，返回删除数。 */
     long deleteByCreatedAtBefore(Instant cutoff);
+
+    /** CAP-115：按分类+target 精确匹配倒序取最近 N 条（Pageable 限量；终端工作区历史用）。 */
+    java.util.List<AgentAuditLogEntity> findByCategoryAndTargetOrderByCreatedAtDescIdDesc(
+            String category, String target, Pageable pageable);
 }

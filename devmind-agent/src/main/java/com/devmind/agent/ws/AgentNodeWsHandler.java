@@ -188,6 +188,12 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
                         frame.path("path").asText(null), frame.path("branch").asText(null),
                         repos, frame.path("error").asText(null));
             }
+            // CAP-115 M2：终端工作区文件直写 ack
+            case "workspace_file_write_ack" -> registry.onWorkspaceFileWriteAck(
+                    String.valueOf(node.getId()), frame.path("requestId").asText(""),
+                    frame.path("ok").asBoolean(false), frame.path("path").asText(null),
+                    frame.path("sha").asText(null), frame.path("conflict").asBoolean(false),
+                    frame.path("error").asText(null));
             // CAP-54：工作区 git 变更快照（瞬态旁路，registry 原样透传给 session/chat bridge）
             case "workspace_status" -> {
                 @SuppressWarnings("unchecked")

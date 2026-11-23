@@ -80,8 +80,8 @@ class TerminalWorkspaceServiceTest {
         }
     }
 
-    /** 内存 terminal_workspaces 仓 */
-    private static TerminalWorkspaceRepository twRepo(Map<String, TerminalWorkspaceEntity> store) {
+    /** 内存 terminal_workspaces 仓（package-private 供 M2 TerminalSessionServiceTest 复用） */
+    static TerminalWorkspaceRepository twRepo(Map<String, TerminalWorkspaceEntity> store) {
         return proxy(TerminalWorkspaceRepository.class, (p, m, args) -> switch (m.getName()) {
             case "save" -> {
                 TerminalWorkspaceEntity e = (TerminalWorkspaceEntity) args[0];

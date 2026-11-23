@@ -330,6 +330,24 @@ public interface AgentNodeConnector {
     }
 
     /**
+     * CAP-115 M2：下发 workspace_file_write 帧并阻塞等 workspace_file_write_ack——runner 对终端工作区
+     * {@code <workspaceRoot>/<projectId>/<workspaceOwner>/worktrees/<workspaceKey>} 内的单文件直写
+     * （path 为工作区相对 POSIX 路径，runner 侧 resolveConfined 双约束越界即拒；contentBase64 为
+     * 全文内容；expectedSha 非空时作乐观锁——现内容 sha 不符不写、ack conflict=true）。
+     * 节点离线/协议版本不足（需 v26+）/等待超时抛 DevMindException(CONFLICT)；
+     * 越界/IO 失败不抛，看 {@link WorkspaceFileWriteResult#ok()}；sha 冲突看
+     * {@link WorkspaceFileWriteResult#conflict()}。
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default WorkspaceFileWriteResult workspaceFileWrite(String nodeId, String workspaceKey,
+                                                        String projectId, String workspaceOwner,
+                                                        String path, String contentBase64,
+                                                        String expectedSha) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
+
+    /**
      * CAP-57：下发 proc 帧并阻塞等 proc_ack——runner 对受管长驻进程（服务实例，如分类边车）     * 执行 start/stop/restart/status（argv 不过 shell，目录收容校验，shutdown 不杀）。
      * 节点离线/协议版本不足（需 v15+）/等待超时抛 DevMindException(CONFLICT)；
      * 动作失败（启动即退出/pid 不存在等）不抛，看 {@link AgentProcResult#ok()}。

@@ -11,6 +11,8 @@ public enum ErrorCode {
     NOT_FOUND(404, "DEV-404", "资源不存在"),
     METHOD_NOT_ALLOWED(405, "DEV-405", "请求方法不支持"),
     CONFLICT(409, "DEV-409", "状态冲突"),
+    /** CAP-115：终端工作区危险命令需前端二次确认（message 中携带完整命令供展示）。 */
+    NEED_CONFIRM(428, "NEED_CONFIRM", "危险命令需确认"),
     TOO_MANY_SESSIONS(429, "DEV-429", "并发会话数已达上限，请稍后再试"),
     INTERNAL(500, "DEV-500", "内部错误"),
     SERVICE_UNAVAILABLE(503, "DEV-503", "服务暂不可用");

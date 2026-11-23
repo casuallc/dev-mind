@@ -107,6 +107,16 @@ public class TerminalWorkspaceService {
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "终端工作区不存在: " + id));
     }
 
+    /** package-private：可空查找（M2 巡检按会话回查工作区，不存在 = 跳过不抛） */
+    TerminalWorkspaceEntity find(String id) {
+        return id == null ? null : terminalWorkspaceRepo.findById(id).orElse(null);
+    }
+
+    /** package-private：M2/M3 会话通道直接落工作区行（锁/活跃时间等字段级更新） */
+    TerminalWorkspaceEntity save(TerminalWorkspaceEntity ent) {
+        return terminalWorkspaceRepo.save(ent);
+    }
+
     // ---------------- 新建 / 挂接 ----------------
 
     /**

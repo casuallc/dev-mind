@@ -1,21 +1,33 @@
 package com.devmind.session.controller;
 
+import com.devmind.common.agent.AgentAuditBridge;
+import com.devmind.common.agent.TerminalCompleteResult;
+import com.devmind.common.agent.TerminalExecResult;
+import com.devmind.session.dto.TerminalOpenView;
+import com.devmind.session.dto.TerminalSessionView;
 import com.devmind.session.dto.TerminalWorkspaceAttachRequest;
 import com.devmind.session.dto.TerminalWorkspaceCreateRequest;
 import com.devmind.session.dto.TerminalWorkspaceView;
+import com.devmind.session.dto.TerminalWsCompleteRequest;
+import com.devmind.session.dto.TerminalWsExecRequest;
+import com.devmind.session.dto.TerminalWsFileWriteRequest;
+import com.devmind.session.service.TerminalSessionService;
 import com.devmind.session.service.TerminalWorkspaceService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
- * CAP-115 终端工作区 REST（M1 登记/挂接/锁）。权限走 ApiPermissionCatalog：
+ * CAP-115 终端工作区 REST：M1 登记/挂接/锁 + M2 终端会话通道（open/exec/cancel/complete/
+ * heartbeat/close）与文件树/读/写/命令历史。权限走 ApiPermissionCatalog：
  * project.terminal.action.manage（列表为登录可读）。
  */
 @RestController
@@ -23,9 +35,12 @@ import java.util.List;
 public class TerminalWorkspaceController {
 
     private final TerminalWorkspaceService terminalWorkspaceService;
+    private final TerminalSessionService terminalSessionService;
 
-    public TerminalWorkspaceController(TerminalWorkspaceService terminalWorkspaceService) {
+    public TerminalWorkspaceController(TerminalWorkspaceService terminalWorkspaceService,
+                                       TerminalSessionService terminalSessionService) {
         this.terminalWorkspaceService = terminalWorkspaceService;
+        this.terminalSessionService = terminalSessionService;
     }
 
     @GetMapping
@@ -60,5 +75,74 @@ public class TerminalWorkspaceController {
     @PostMapping("/{id}/unlock")
     public TerminalWorkspaceView unlock(@PathVariable String id) {
         return terminalWorkspaceService.unlock(id);
+    }
+
+    // ---------------- M2 终端会话通道 ----------------
+
+    /** 打开终端：占用锁 → 重发 terminal_ws_prepare 幂等重绑 → 会话 RUNNING（SUSPENDED 复活）。 */
+    @PostMapping("/{id}/terminal/open")
+    public TerminalOpenView openTerminal(@PathVariable String id) {
+        return terminalSessionService.open(id);
+    }
+
+    /** 执行命令：危险命令未 confirmed → 428（前端二次确认重发）；confirmed 放行并审计确认人。 */
+    @PostMapping("/{id}/terminal/exec")
+    public TerminalExecResult exec(@PathVariable String id, @RequestBody TerminalWsExecRequest req) {
+        return terminalSessionService.exec(id, req.command(), req.cwd(), req.confirmed());
+    }
+
+    /** 取消执行中命令（fire-and-forget）。 */
+    @PostMapping("/{id}/terminal/cancel")
+    public Map<String, Boolean> cancel(@PathVariable String id) {
+        terminalSessionService.cancel(id);
+        return Map.of("ok", true);
+    }
+
+    /** Tab 补全。 */
+    @PostMapping("/{id}/terminal/complete")
+    public TerminalCompleteResult complete(@PathVariable String id,
+                                           @RequestBody TerminalWsCompleteRequest req) {
+        return terminalSessionService.complete(id, req.input(), req.cwd());
+    }
+
+    /** 心跳：续期会话 last_heartbeat_at + 工作区锁（前端 30s 一跳；90s 无心跳巡检挂起）。 */
+    @PostMapping("/{id}/terminal/heartbeat")
+    public TerminalSessionView heartbeat(@PathVariable String id) {
+        return terminalSessionService.heartbeat(id);
+    }
+
+    /** 关闭终端：会话 CLOSED + 释放本人占用锁（幂等）。 */
+    @PostMapping("/{id}/terminal/close")
+    public TerminalSessionView close(@PathVariable String id) {
+        return terminalSessionService.close(id);
+    }
+
+    // ---------------- M2 文件读写 / 命令历史 ----------------
+
+    /** 文件树（复用 CAP-54 workspace_query tree 只读帧）。 */
+    @GetMapping("/{id}/files/tree")
+    public Map<String, Object> fileTree(@PathVariable String id,
+                                        @RequestParam(required = false) String path) {
+        return terminalSessionService.fileTree(id, path == null ? "" : path);
+    }
+
+    /** 文件内容（复用 CAP-54 workspace_query file 只读帧）。 */
+    @GetMapping("/{id}/files/file")
+    public Map<String, Object> fileRead(@PathVariable String id, @RequestParam String path) {
+        return terminalSessionService.fileRead(id, path);
+    }
+
+    /** 文件直写（workspace_file_write 帧，expectedSha 乐观锁：不符 → 409 带当前 sha）。 */
+    @PutMapping("/{id}/files/file")
+    public Map<String, Object> fileWrite(@PathVariable String id,
+                                         @RequestBody TerminalWsFileWriteRequest req) {
+        return terminalSessionService.fileWrite(id, req.path(), req.contentBase64(), req.expectedSha());
+    }
+
+    /** 命令历史：COMMAND 类审计按 workspaceKey 倒序（最近 limit 条，上限 200）。 */
+    @GetMapping("/{id}/history")
+    public List<AgentAuditBridge.Entry> history(@PathVariable String id,
+                                                @RequestParam(defaultValue = "50") int limit) {
+        return terminalSessionService.history(id, limit);
     }
 }
