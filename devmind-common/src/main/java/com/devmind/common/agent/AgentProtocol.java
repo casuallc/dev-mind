@@ -79,12 +79,16 @@ package com.devmind.common.agent;
      * {@code launched{ok:true}} 语义从「进程已拉起」变为「已受理」——纯帧校验通过即回，
      * 准备失败/被终止改经 system 事件 + exit 帧异步回报；线格式与帧类型不变，
      * <b>语义澄清不门控</b>（老服务端兼容：exit/system 帧自始就有，handleExit 对零事件
-     * 会话同样成立；老 runner 配新服务端只是回 ack 慢，仍可能超时，属旧缺陷未放大）。</p>
+     * 会话同样成立；老 runner 配新服务端只是回 ack 慢，仍可能超时，属旧缺陷未放大）。
+     * v26 = CAP-115 终端工作区（terminal_ws_prepare 帧：服务端下发 workspaceKey/repos
+     * 请求 runner 幂等物化 worktrees/term-<id> 键控工作区并回 ack{path,branch}；
+     * 老 runner 不认识该帧会静默忽略，服务端空等超时，故属「必须认识」需门控，409
+     * 话术引导升级 runner）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 25;
+    public static final int CURRENT = 26;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -169,6 +173,9 @@ public final class AgentProtocol {
 
     /** CAP-104 M1.5 程序型用例（exec bundle.kind=test-program，树形解包 + 程序契约注入）所需最低版本 */
     public static final int TEST_PROGRAM_BUNDLE = 24;
+
+    /** CAP-115 终端工作区（terminal_ws_prepare/terminal_ws_prepare_ack 帧：幂等物化 term-<id> 键控工作区）所需最低版本 */
+    public static final int TERMINAL_WS_PREPARE = 26;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

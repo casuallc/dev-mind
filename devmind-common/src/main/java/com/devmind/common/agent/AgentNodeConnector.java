@@ -313,6 +313,23 @@ public interface AgentNodeConnector {
     }
 
     /**
+     * CAP-115：下发 terminal_ws_prepare 帧并阻塞等 terminal_ws_prepare_ack——runner 对终端工作区
+     * {@code <workspaceRoot>/<projectId>/<workspaceOwner>/worktrees/<workspaceKey>} 逐库幂等物化
+     * （clone→fetch→ensureUserWorktree：目录存在且分支吻合 = 复用；分支不吻合 = 占用冲突报错；
+     * token 仅随帧传输严禁进日志）。workspaceKey 形如 {@code term-<8位短id>}，分支
+     * {@code terminal/<短id>}（runner 侧白名单放行 terminal/ 前缀）。
+     * 节点离线/协议版本不足（需 v26+）/等待超时抛 DevMindException(CONFLICT)；
+     * 占用冲突/物化失败不抛，看 {@link TerminalWsPrepareResult#ok()}。
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default TerminalWsPrepareResult terminalWorkspacePrepare(String nodeId, String workspaceKey,
+                                                             String projectId, String workspaceOwner,
+                                                             List<AgentLaunchCommand.RepoSpec> specs) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
+
+    /**
      * CAP-57：下发 proc 帧并阻塞等 proc_ack——runner 对受管长驻进程（服务实例，如分类边车）     * 执行 start/stop/restart/status（argv 不过 shell，目录收容校验，shutdown 不杀）。
      * 节点离线/协议版本不足（需 v15+）/等待超时抛 DevMindException(CONFLICT)；
      * 动作失败（启动即退出/pid 不存在等）不抛，看 {@link AgentProcResult#ok()}。

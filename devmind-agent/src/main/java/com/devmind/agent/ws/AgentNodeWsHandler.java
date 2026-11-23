@@ -178,6 +178,16 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
             case "workspace_release_ack" -> registry.onWorkspaceReleaseAck(String.valueOf(node.getId()),
                     frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
                     frame.path("detail").asText(null), frame.path("error").asText(null));
+            // CAP-115：终端工作区物化 ack
+            case "terminal_ws_prepare_ack" -> {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> repos = frame.has("repos")
+                        ? mapper.convertValue(frame.path("repos"), List.class) : List.of();
+                registry.onTerminalWsPrepareAck(String.valueOf(node.getId()),
+                        frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
+                        frame.path("path").asText(null), frame.path("branch").asText(null),
+                        repos, frame.path("error").asText(null));
+            }
             // CAP-54：工作区 git 变更快照（瞬态旁路，registry 原样透传给 session/chat bridge）
             case "workspace_status" -> {
                 @SuppressWarnings("unchecked")

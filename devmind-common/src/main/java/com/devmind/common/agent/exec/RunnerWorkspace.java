@@ -134,9 +134,7 @@ public class RunnerWorkspace {
         requireSafeId(projectId, "projectId");
         String owner = requireOwner(workspaceOwner);
         String key = requireKey(workspaceKey);
-        if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
-            throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
-        }
+        requireSessionBranch(spec.branch());
         Path userRoot = userRoot(projectId, owner);
         Path cacheDir = userRoot.resolve("main").normalize();
         Path workDir = worktreeRoot(userRoot, key);
@@ -190,9 +188,7 @@ public class RunnerWorkspace {
         try {
             for (RepoSpec spec : specs) {
                 requireRepoName(spec.name(), true);
-                if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
-                    throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
-                }
+                requireSessionBranch(spec.branch());
                 Path cacheDir = userRoot.resolve(spec.name()).resolve("main").normalize();
                 Path workDir = aggRoot.resolve(spec.name()).normalize();
                 if (!cacheDir.startsWith(workspaceRoot) || !workDir.startsWith(aggRoot)) {
@@ -632,9 +628,7 @@ public class RunnerWorkspace {
         for (RepoSpec spec : specs) {
             String label = spec.name() != null && !spec.name().isBlank() ? "[" + spec.name() + "] " : "";
             requireRepoName(spec.name(), multi);
-            if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
-                throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
-            }
+            requireSessionBranch(spec.branch());
             Path cacheDir = multi
                     ? userRoot.resolve(spec.name()).resolve("main").normalize()
                     : userRoot.resolve("main").normalize();
@@ -955,9 +949,7 @@ public class RunnerWorkspace {
         for (RepoSpec spec : specs) {
             String label = spec.name() != null && !spec.name().isBlank() ? "[" + spec.name() + "] " : "";
             requireRepoName(spec.name(), multi);
-            if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
-                throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
-            }
+            requireSessionBranch(spec.branch());
             Path cacheDir = multi
                     ? userRoot.resolve(spec.name()).resolve("main").normalize()
                     : userRoot.resolve("main").normalize();
@@ -1332,10 +1324,25 @@ public class RunnerWorkspace {
         }
     }
 
-    /** 占用分支名 → 占用会话 id（feature/&lt;sid&gt; 约定；无法识别时原样返回） */
+    /** 占用分支名 → 占用会话 id（feature/&lt;sid&gt; / CAP-115 terminal/&lt;短id&gt; 约定；无法识别时原样返回） */
     private static String occupantOf(String branch) {
-        return branch != null && branch.startsWith("feature/") && branch.length() > "feature/".length()
-                ? branch.substring("feature/".length()) : String.valueOf(branch);
+        if (branch != null && branch.startsWith("feature/") && branch.length() > "feature/".length()) {
+            return branch.substring("feature/".length());
+        }
+        if (branch != null && branch.startsWith("terminal/") && branch.length() > "terminal/".length()) {
+            return "term-" + branch.substring("terminal/".length());
+        }
+        return String.valueOf(branch);
+    }
+
+    /**
+     * CAP-115：会话分支白名单校验——feature/（编码会话）与 terminal/（终端工作区）并列放行，
+     * 不做任意放行（防帧被仿造检出任意分支）。
+     */
+    private static void requireSessionBranch(String branch) {
+        if (branch == null || !(branch.startsWith("feature/") || branch.startsWith("terminal/"))) {
+            throw new IllegalStateException("非法会话分支（必须 feature/ 或 terminal/ 前缀）: " + branch);
+        }
     }
 
     /**
