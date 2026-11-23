@@ -18,9 +18,13 @@ import type { WorkspaceRow } from '../../sessions/types'
 import {
   attachTerminalWorkspace,
   createTerminalWorkspace,
+  fetchFinalizeDetail,
   listTerminalWorkspaces,
   unlockTerminalWorkspace,
 } from '../api'
+import FinalizeWorkspaceModal from '../components/FinalizeWorkspaceModal'
+import ReleaseWorkspaceModal from '../components/ReleaseWorkspaceModal'
+import { showFinalizeDetail } from '../components/finalizeDetail'
 import type { TerminalWorkspaceView } from '../types'
 
 type SubView = 'terminal' | 'session'
@@ -42,6 +46,7 @@ export default function WorktreeListPage() {
   const projectId = useSyncExternalStore(subscribeCurrentProject, getCurrentProjectId)
   const { canAction } = usePermissions()
   const canManage = canAction('project.terminal.action.manage')
+  const canFinalize = canAction('project.terminal.action.finalize')
 
   const [subView, setSubView] = useState<SubView>('terminal')
   const [rows, setRows] = useState<TerminalWorkspaceView[]>([])
@@ -52,6 +57,9 @@ export default function WorktreeListPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [attachOpen, setAttachOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  /** M3 收口/释放弹窗目标工作区 */
+  const [finalizeTarget, setFinalizeTarget] = useState<TerminalWorkspaceView | null>(null)
+  const [releaseTarget, setReleaseTarget] = useState<TerminalWorkspaceView | null>(null)
   const [createForm] = Form.useForm<{ baseBranch?: string; agentNodeId?: string }>()
   const [attachForm] = Form.useForm<{ workspaceKey: string; baseBranch?: string; agentNodeId?: string }>()
 
@@ -151,6 +159,20 @@ export default function WorktreeListPage() {
     })
   }
 
+  /** M3 收口记录查看（detail 空 = 未收口过） */
+  const onShowFinalizeDetail = async (row: TerminalWorkspaceView) => {
+    try {
+      const r = await fetchFinalizeDetail(row.id)
+      if (r.detail) {
+        showFinalizeDetail(r.detail, r.finalizedAt)
+      } else {
+        message.info('该工作区无收口记录')
+      }
+    } catch (e) {
+      showError(e, '收口记录加载失败')
+    }
+  }
+
   const terminalColumns: ColumnsType<TerminalWorkspaceView> = [
     {
       title: '工作区键',
@@ -202,7 +224,7 @@ export default function WorktreeListPage() {
     {
       title: '操作',
       key: 'action',
-      width: 130,
+      width: 240,
       render: (_, r) => (
         <Space size={4}>
           {r.state === 'OPEN' && (
@@ -213,6 +235,21 @@ export default function WorktreeListPage() {
           {r.lockOwner && canManage && (
             <Button size="small" onClick={() => onUnlock(r)}>
               解锁
+            </Button>
+          )}
+          {r.state === 'OPEN' && canFinalize && (
+            <Button size="small" onClick={() => setFinalizeTarget(r)}>
+              收口
+            </Button>
+          )}
+          {r.state !== 'RELEASED' && canFinalize && (
+            <Button size="small" danger onClick={() => setReleaseTarget(r)}>
+              释放
+            </Button>
+          )}
+          {r.finalizedAt && (
+            <Button size="small" type="link" onClick={() => void onShowFinalizeDetail(r)}>
+              收口记录
             </Button>
           )}
         </Space>
@@ -383,6 +420,30 @@ export default function WorktreeListPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* M3 收口 / 释放确认弹窗（目标行） */}
+      {finalizeTarget && (
+        <FinalizeWorkspaceModal
+          ws={finalizeTarget}
+          open
+          onCancel={() => setFinalizeTarget(null)}
+          onDone={() => {
+            setFinalizeTarget(null)
+            void load()
+          }}
+        />
+      )}
+      {releaseTarget && (
+        <ReleaseWorkspaceModal
+          ws={releaseTarget}
+          open
+          onCancel={() => setReleaseTarget(null)}
+          onDone={() => {
+            setReleaseTarget(null)
+            void load()
+          }}
+        />
+      )}
     </Card>
   )
 }

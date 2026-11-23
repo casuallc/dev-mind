@@ -6,6 +6,7 @@ import type {
 } from '../../shared/chat/workspace/api'
 import type { TerminalCompleteResult, TerminalExecResult } from '../../shared/terminal/types'
 import type {
+  FinalizeDetailView,
   TerminalFileWriteResult,
   TerminalHistoryEntry,
   TerminalOpenView,
@@ -103,4 +104,28 @@ export function writeFile(id: string, path: string, contentBase64: string, expec
 
 export function fetchHistory(id: string, limit = 50) {
   return api.get<TerminalHistoryEntry[]>(`${BASE}/${id}/history${qs({ limit: String(limit) })}`)
+}
+
+// ---------------- M3 收口 / 释放 / 收口记录 ----------------
+
+/**
+ * 收口：confirmCode 服务端硬校验（=workspaceKey，防误点）；
+ * 脏工作区且未 discardChanges → 409 列前 3 个改动文件；锁/运行中终端占用 → 409。
+ */
+export function finalizeTerminalWorkspace(id: string, req: {
+  confirmCode: string
+  discardChanges?: boolean
+  deleteRemoteBranch?: boolean
+}) {
+  return api.post<FinalizeDetailView>(`${BASE}/${id}/finalize`, req)
+}
+
+/** 收口记录查看（未收口过 detail=null，不抛错） */
+export function fetchFinalizeDetail(id: string) {
+  return api.get<FinalizeDetailView>(`${BASE}/${id}/finalize-detail`)
+}
+
+/** 释放（丢弃语义：不合并不 push）：脏工作区默认 409，discardChanges=true 强制。 */
+export function releaseTerminalWorkspace(id: string, discardChanges: boolean) {
+  return api.del<TerminalWorkspaceView>(`${BASE}/${id}${qs({ discardChanges: String(discardChanges) })}`)
 }

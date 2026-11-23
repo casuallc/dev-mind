@@ -34,6 +34,9 @@ import { showError } from '../../../shared/utils/showError'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import { setCurrentProject } from '../../../app/currentProjectStore'
 import { usePermissions } from '../../auth/usePermissions'
+import FinalizeWorkspaceModal from '../components/FinalizeWorkspaceModal'
+import ReleaseWorkspaceModal from '../components/ReleaseWorkspaceModal'
+import { showFinalizeDetail } from '../components/finalizeDetail'
 import * as tw from '../api'
 import type { TerminalSessionView, TerminalWorkspaceView } from '../types'
 
@@ -70,6 +73,7 @@ export default function TerminalWorkspacePage() {
   const navigate = useNavigate()
   const { canAction } = usePermissions()
   const canManage = canAction('project.terminal.action.manage')
+  const canFinalize = canAction('project.terminal.action.finalize')
 
   const [ws, setWs] = useState<TerminalWorkspaceView | null>(null)
   const [notFound, setNotFound] = useState(false)
@@ -81,6 +85,8 @@ export default function TerminalWorkspacePage() {
   const [treeLoaded, setTreeLoaded] = useState(false)
   const [editing, setEditing] = useState<EditingFile | null>(null)
   const [fileLoading, setFileLoading] = useState(false)
+  const [finalizeOpen, setFinalizeOpen] = useState(false)
+  const [releaseOpen, setReleaseOpen] = useState(false)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const running = session?.state === 'RUNNING'
@@ -156,6 +162,20 @@ export default function TerminalWorkspacePage() {
       void load()
     } catch (e) {
       showError(e, '关闭终端失败')
+    }
+  }
+
+  /** M3 收口记录查看（detail 空 = 未收口过） */
+  const onShowFinalizeDetail = async () => {
+    try {
+      const r = await tw.fetchFinalizeDetail(id)
+      if (r.detail) {
+        showFinalizeDetail(r.detail, r.finalizedAt)
+      } else {
+        message.info('该工作区无收口记录')
+      }
+    } catch (e) {
+      showError(e, '收口记录加载失败')
     }
   }
 
@@ -292,6 +312,19 @@ export default function TerminalWorkspacePage() {
               关闭终端
             </Button>
           )}
+          {ws.finalizedAt && (
+            <Button onClick={() => void onShowFinalizeDetail()}>收口记录</Button>
+          )}
+          {ws.state === 'OPEN' && canFinalize && !running && (
+            <Button type="primary" ghost onClick={() => setFinalizeOpen(true)}>
+              收口
+            </Button>
+          )}
+          {ws.state !== 'RELEASED' && canFinalize && !running && (
+            <Button danger onClick={() => setReleaseOpen(true)}>
+              释放
+            </Button>
+          )}
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/terminal-workspaces')}>
             返回列表
           </Button>
@@ -421,6 +454,26 @@ export default function TerminalWorkspacePage() {
           )}
         </div>
       </div>
+
+      {/* M3 收口 / 释放确认弹窗 */}
+      <FinalizeWorkspaceModal
+        ws={ws}
+        open={finalizeOpen}
+        onCancel={() => setFinalizeOpen(false)}
+        onDone={() => {
+          setFinalizeOpen(false)
+          void load()
+        }}
+      />
+      <ReleaseWorkspaceModal
+        ws={ws}
+        open={releaseOpen}
+        onCancel={() => setReleaseOpen(false)}
+        onDone={() => {
+          setReleaseOpen(false)
+          void load()
+        }}
+      />
     </Card>
   )
 }

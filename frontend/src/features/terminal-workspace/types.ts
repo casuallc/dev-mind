@@ -63,3 +63,11 @@ export interface TerminalFileWriteResult {
   path: string
   sha: string
 }
+
+/** M3 收口记录视图（FinalizeDetailView；detail 空 = 未收口过） */
+export interface FinalizeDetailView {
+  /** OPEN / FINALIZED / RELEASED */
+  workspaceState: string
+  detail?: string | null
+  finalizedAt?: string | null
+}
