@@ -827,6 +827,42 @@ class RunnerWorkspaceTest {
                 () -> git(ctx.cacheDir(), "rev-parse", "--verify", "refs/heads/feature/req-ab12cd34"));
     }
 
+    /**
+     * CAP-115：终端工作区（terminal_ws_prepare 恒走 prepareMulti）<b>单库</b>也是多库布局——
+     * worktree 在 worktrees/&lt;key&gt;/&lt;repoName&gt;、缓存在 &lt;owner&gt;/&lt;repoName&gt;/main。
+     * 收口/释放帧只带 1 个 repo（size=1 旧逻辑误判单库布局 → 克隆缓存缺失），必须按实物证据识别。
+     */
+    @Test
+    void terminalSingleRepoMultiLayoutFinalizeAndRelease() throws Exception {
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "terminal/t1", "", "app");
+
+        // 终端工作区物化：单库也走多库布局 worktrees/term-t1/app + 缓存 alice/app/main
+        RunnerWorkspace.MultiCtx mctx = ws.prepareMulti("term-t1", "proj1", "alice", "term-t1",
+                List.of(spec));
+        Path repoDir = mctx.aggRoot().resolve("app");
+        assertTrue(Files.exists(repoDir.resolve(".git")), "多库布局：repo 子目录即 worktree");
+
+        Files.writeString(repoDir.resolve("code.txt"), "终端改动");
+        git(repoDir, "add", ".");
+        git(repoDir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "终端改动");
+
+        // 收口：单 repo 帧也必须命中多库布局（合并到基线 + push；keyed 保留工作树）
+        RunnerWorkspace.FinalizeOutcome r = ws.finalize("proj1", "alice", List.of(spec), false,
+                "term-t1");
+        assertEquals(0, r.exit(), r.output());
+        assertEquals("终端改动", git(origin, "show", "main:code.txt").trim(), "基线含终端改动");
+        assertTrue(Files.isDirectory(repoDir), "keyed 收口保留工作树");
+
+        // 释放：worktree 与空壳聚合根一并回收
+        RunnerWorkspace.ReleaseOutcome relOut = ws.release("proj1", "alice", List.of(spec), "term-t1");
+        assertEquals(0, relOut.exit(), relOut.output());
+        assertTrue(Files.notExists(mctx.aggRoot()), "释放后聚合根（含 worktree）删除");
+    }
+
     /** CAP-51 FR-06 终态清理：deleteRemoteBranch=true → 本地释放 + 远端需求分支一并删除（幂等）。 */
     @Test
     void releaseWithDeleteRemoteBranchCleansRemoteToo() throws Exception {
