@@ -54,6 +54,12 @@ public class TunnelConnection {
     static final long KEEPALIVE_INTERVAL_MS = 25_000;
     /** 下行静默判定阈值（≈3 个心跳周期）：收到过服务端心跳后超此判定静默断链，主动 abort 触发重连 */
     static final long KEEPALIVE_TIMEOUT_MS = 75_000;
+    /** hello 到达超时：onOpen 后超此未收到 tunnel_hello = 连接死在服务端注册之前
+     * （途中 RST 被 JDK 静默吞掉、不回调 onClose/onError，socket 静没——2026-11-25 实锤：
+     * 194 重启后 runner 隧道 onOpen 成功但 hello 未达、TCP 已消失，心跳兼容门（heartbeatSeen=false）
+     * 把静默判定关着 → run() 干挂 closed.await() 75 分钟不自愈、隧道永离线）。hello 由服务端
+     * 在 afterConnectionEstablished 同步下发（跨网秒级），30s 足够宽容 */
+    static final long HELLO_TIMEOUT_MS = 30_000;
 
     private final RunnerConfig config;
     private final ObjectMapper mapper;
@@ -65,6 +71,7 @@ public class TunnelConnection {
     /** 保活参数为实例字段（测试可调小），默认取常量 */
     volatile long keepaliveIntervalMs = KEEPALIVE_INTERVAL_MS;
     volatile long keepaliveTimeoutMs = KEEPALIVE_TIMEOUT_MS;
+    volatile long helloTimeoutMs = HELLO_TIMEOUT_MS;
     /**
      * 本连接的服务端是否具备心跳能力：老口径是「收到过 tunnel_ping」才启用下行静默判定
      * （兼容无心跳的老服务端），但连接若死在首个心跳之前（NAT/云网关丢空闲 TCP），静默
@@ -73,6 +80,11 @@ public class TunnelConnection {
      * 建连瞬间启用判定；老服务端的 tunnel_hello 无此字段，兼容门依旧成立。
      */
     volatile boolean heartbeatSeen;
+    /**
+     * 本连接是否已收到 tunnel_hello（新老服务端都会下发；hello 超时闸门的判定依据）。
+     * 与 {@link #heartbeatSeen} 区分：后者是心跳能力广告门，本字段只管「注册流量到底到没到」。
+     */
+    volatile boolean helloSeen;
     private final Map<Integer, RunnerTunnelStream> streams = new ConcurrentHashMap<>();
     private volatile boolean running = true;
 
@@ -112,6 +124,7 @@ public class TunnelConnection {
                 current.set(ws);
                 lastInboundAt.set(connectedAt);
                 heartbeatSeen = false;
+                helloSeen = false;
                 Thread.ofVirtual().name("tunnel-keepalive").start(() -> keepaliveLoop(ws, closed));
                 closed.await();
                 healthy = System.currentTimeMillis() - connectedAt >= ServerConnection.MIN_HEALTHY_MS;
@@ -253,6 +266,7 @@ public class TunnelConnection {
      * 否则 run() 永远挂在 closed.await() 上不再重连——2026-10-10 实锤）。包内可见供测试直驱。
      */
     void keepaliveLoop(WebSocket ws, CountDownLatch closed) {
+        long connectedAt = System.currentTimeMillis();
         while (running && current.get() == ws) {
             try {
                 Thread.sleep(keepaliveIntervalMs);
@@ -262,6 +276,15 @@ public class TunnelConnection {
             }
             if (!running || current.get() != ws) {
                 return; // 连接已换/已断，旧循环退场
+            }
+            // hello 超时闸：注册流量（tunnel_hello）迟迟不到 = 连接死于服务端注册前，
+            // 心跳兼容门此时是关着的，不靠它救——直接判定死亡断开重连
+            if (!helloSeen && System.currentTimeMillis() - connectedAt > helloTimeoutMs) {
+                log.warn("隧道建连 {}ms 未收到 tunnel_hello（连接死于服务端注册前，JDK 未投递关闭事件），主动断开重连",
+                        System.currentTimeMillis() - connectedAt);
+                ws.abort();
+                closed.countDown();
+                return;
             }
             long silentMs = System.currentTimeMillis() - lastInboundAt.get();
             if (heartbeatSeen && silentMs > keepaliveTimeoutMs) {
@@ -305,6 +328,7 @@ public class TunnelConnection {
             JsonNode frame = mapper.readTree(text);
             String type = frame.path("type").asText("");
             if ("tunnel_hello".equals(type)) {
+                helloSeen = true; // 注册流量已到，关闭 hello 超时闸
                 List<String> allowed = new ArrayList<>();
                 frame.path("allowedHosts").forEach(h -> allowed.add(h.asText("")));
                 EgressHostAllowlist.set(allowed);

@@ -135,6 +135,7 @@ class TunnelConnectionTest {
         tunnel.keepaliveTimeoutMs = 200;
         tunnel.lastInboundAt.set(System.currentTimeMillis());
         tunnel.heartbeatSeen = true;
+        tunnel.helloSeen = true; // 有心跳的连接必然已收 hello，绕开 hello 超时闸
         CountDownLatch closed = new CountDownLatch(1);
         Thread t = Thread.ofVirtual().start(() -> tunnel.keepaliveLoop(tunnel.current.get(), closed));
         awaitTrue(() -> abortCount.get() >= 1, 5000, "静默超阈值应 abort");
@@ -150,10 +151,49 @@ class TunnelConnectionTest {
         tunnel.keepaliveTimeoutMs = 120;
         tunnel.lastInboundAt.set(System.currentTimeMillis());
         tunnel.heartbeatSeen = false;
+        tunnel.helloSeen = true; // 老服务端也有 hello，只是无心跳——绕开 hello 超时闸
         Thread t = Thread.ofVirtual().start(() ->
                 tunnel.keepaliveLoop(tunnel.current.get(), new CountDownLatch(1)));
         Thread.sleep(500); // 远超 timeout，若误判必已 abort
         assertEquals(0, abortCount.get(), "未收到过心跳不得启用静默断链判定");
+        tunnel.shutdown();
+        t.join(5000);
+    }
+
+    @Test
+    void missingHelloAbortsAndReleasesClosedLatch() throws Exception {
+        // hello 超时闸：建连后迟迟收不到 tunnel_hello = 连接死于服务端注册前
+        // （途中 RST 被 JDK 静默吞掉，无 onClose/onError——2026-11-25 隧道永离线事故），
+        // 必须 abort + 放行 closed 闩锁让 run() 重连，不能干挂
+        tunnel.keepaliveIntervalMs = 40;
+        tunnel.helloTimeoutMs = 150;
+        tunnel.lastInboundAt.set(System.currentTimeMillis());
+        tunnel.heartbeatSeen = false; // 兼容门关着（正是事故现场）：闸门不能靠它
+        tunnel.helloSeen = false;
+        CountDownLatch closed = new CountDownLatch(1);
+        Thread t = Thread.ofVirtual().start(() -> tunnel.keepaliveLoop(tunnel.current.get(), closed));
+        awaitTrue(() -> abortCount.get() >= 1, 5000, "hello 超时未达应 abort");
+        assertTrue(closed.await(2, TimeUnit.SECONDS),
+                "abort 后必须放行 closed 闩锁，否则 run() 挂在 await 上永不重连");
+        t.join(5000);
+    }
+
+    @Test
+    void helloArrivingBeforeTimeoutKeepsGateOpen() throws Exception {
+        // hello 在超时前到达：闸门关闭，不误杀；也无心跳广告 → 静默判定保持关闭
+        tunnel.keepaliveIntervalMs = 40;
+        tunnel.keepaliveTimeoutMs = 120;
+        tunnel.helloTimeoutMs = 10_000; // hello 先到，超时值多少都无所谓
+        tunnel.heartbeatSeen = false;
+        tunnel.helloSeen = false;
+        Thread t = Thread.ofVirtual().start(() ->
+                tunnel.keepaliveLoop(tunnel.current.get(), new CountDownLatch(1)));
+        Thread.sleep(100);
+        tunnel.onTunnelText("{\"type\":\"tunnel_hello\",\"protocolVersion\":21,"
+                + "\"allowedHosts\":[\"*.apusic.com\"]}");
+        assertTrue(tunnel.helloSeen, "收到 tunnel_hello 应置 helloSeen");
+        Thread.sleep(500);
+        assertEquals(0, abortCount.get(), "hello 已到达不得触发超时闸");
         tunnel.shutdown();
         t.join(5000);
     }
@@ -201,6 +241,7 @@ class TunnelConnectionTest {
         tunnel.keepaliveIntervalMs = 40;
         tunnel.keepaliveTimeoutMs = 250;
         tunnel.heartbeatSeen = true;
+        tunnel.helloSeen = true;
         Thread t = Thread.ofVirtual().start(() ->
                 tunnel.keepaliveLoop(tunnel.current.get(), new CountDownLatch(1)));
         // 模拟持续有下行（心跳/业务帧）：800ms 内不断刷新 lastInboundAt
