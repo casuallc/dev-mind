@@ -34,6 +34,17 @@ import java.util.concurrent.TimeUnit;
  */
 public class AgentRunnerMain {
 
+    static {
+        // slf4j-simple 默认无时间戳，断线时序排障全靠对时（2026-11-25 隧道假死定位被无时间戳拖累）；
+        // 静态初始化先于任何 Logger 创建，命令行 -D 传入优先
+        if (System.getProperty("org.slf4j.simpleLogger.showDateTime") == null) {
+            System.setProperty("org.slf4j.simpleLogger.showDateTime", "true");
+        }
+        if (System.getProperty("org.slf4j.simpleLogger.dateTimeFormat") == null) {
+            System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "yyyy-MM-dd HH:mm:ss.SSS");
+        }
+    }
+
     private static final Logger log = LoggerFactory.getLogger(AgentRunnerMain.class);
     /** 心跳周期：须明显小于服务端 heartbeatTimeoutMs（默认 45s） */
     private static final long HEARTBEAT_MS = 15_000;
