@@ -5,6 +5,9 @@ package com.devmind.flow.dto;
  *
  * @param userSuggestion 用户补充建议（可空）：服务端清洗（去控制字符、上限截断）后
  *                       拼到规划会话 taskSpec 末尾，标注为用户补充建议；null/空白时输出与不带建议完全一致
+ * @param withAnalysis   CAP-116 本次规划是否走需求分析（缺省 null = 开；false = 本次不要求
+ *                       analysis.md 产出，不落需求实体）
+ * @param withDesign     CAP-116 本次规划是否走方案设计（同上，对应 design.md）
  */
-public record FlowPlanRequest(String userSuggestion) {
+public record FlowPlanRequest(String userSuggestion, Boolean withAnalysis, Boolean withDesign) {
 }

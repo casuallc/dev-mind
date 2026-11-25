@@ -27,11 +27,15 @@ public class RequirementFlowController {
     }
 
     /** CAP-52 FR-01「开启 AI 规划」：一个会话产出分析 + 方案 + 工作单元，产出后自动起开发会话。
-     *  body 可空：带 userSuggestion 时清洗后拼入规划 taskSpec 末尾（REQ-16 补充建议）。 */
+     *  body 可空：带 userSuggestion 时清洗后拼入规划 taskSpec 末尾（REQ-16 补充建议）；
+     *  CAP-116：withAnalysis/withDesign 缺省为开，关闭时本次规划收窄产出范围。 */
     @PostMapping("/requirements/{requirementId}/flow/plan")
     public SessionView plan(@PathVariable String projectId, @PathVariable String requirementId,
                             @RequestBody(required = false) FlowPlanRequest body) {
-        return service.startPlan(projectId, requirementId, body == null ? null : body.userSuggestion());
+        return service.startPlan(projectId, requirementId,
+                body == null ? null : body.userSuggestion(),
+                body == null ? null : body.withAnalysis(),
+                body == null ? null : body.withDesign());
     }
 
     /** CAP-52 FR-04「重新开发」：按已固化清单重起需求级开发会话。 */

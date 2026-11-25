@@ -836,6 +836,76 @@ class RequirementFlowServiceTest {
         assertTrue(view.taskSpec().contains(FlowOutputContract.DESIGN_FILE));
     }
 
+    // ---------------- CAP-116：按次选择是否走分析/方案 ----------------
+
+    @Test
+    void 规划入口_本次关闭分析与方案时收窄范围且不动实体标记() {
+        RequirementEntity req = requirementService.add("r1", RequirementEntity.STATUS_DRAFT);
+
+        SessionView view = service.startPlan("p1", "r1", null, false, false);
+
+        assertTrue(view.taskSpec().startsWith(FlowOutputContract.MARKER_PLAN));
+        assertTrue(!view.taskSpec().contains(FlowOutputContract.ANALYSIS_FILE));
+        assertTrue(!view.taskSpec().contains(FlowOutputContract.DESIGN_FILE));
+        assertTrue(view.taskSpec().contains(FlowOutputContract.WI_PLAN_FILE));
+        assertTrue(FlowOutputContract.planSkips(view.taskSpec(), "analysis"));
+        assertTrue(FlowOutputContract.planSkips(view.taskSpec(), "design"));
+        // 跳过范围不落需求实体：重新规划仍可回到全量
+        assertTrue(!req.getAnalysisSkipped());
+        assertTrue(!req.getDesignSkipped());
+    }
+
+    @Test
+    void 规划入口_开关缺省与三参版本输出一致() {
+        requirementService.add("r1", RequirementEntity.STATUS_DRAFT);
+
+        SessionView view = service.startPlan("p1", "r1", null, null, null);
+
+        assertTrue(view.taskSpec().contains(FlowOutputContract.ANALYSIS_FILE));
+        assertTrue(view.taskSpec().contains(FlowOutputContract.DESIGN_FILE));
+        assertTrue(!FlowOutputContract.planSkips(view.taskSpec(), "analysis"));
+    }
+
+    @Test
+    void 规划产出_taskSpec声明跳过时豁免缺失判定并自动起开发() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+        addSession("s3", null, "r1",
+                FlowOutputContract.MARKER_PLAN + "\n[plan:skip analysis design]\n规划任务");
+        sessionOutputService.put("s3", FlowOutputContract.WI_PLAN_FILE,
+                """
+                [{"type":"DEVELOPMENT","title":"A","spec":"a","dependsOn":[]}]
+                """);
+
+        fireCompleted("s3");
+
+        // 缺 analysis/design 属本次声明的产出范围，不报 partial，照常自动起开发会话
+        assertEquals(1, notificationService.ofType("flow.plan.done").size());
+        assertEquals(0, notificationService.ofType("flow.plan.partial").size());
+        assertEquals(1, workItemService.list("p1", "r1").size());
+        assertEquals(1, sessionManager.requests.size());
+    }
+
+    @Test
+    void 规划产出_本次只关设计时缺方案不缺失但缺分析仍报部分产出() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+        addSession("s3", null, "r1",
+                FlowOutputContract.MARKER_PLAN + "\n[plan:skip design]\n规划任务");
+        sessionOutputService.put("s3", FlowOutputContract.WI_PLAN_FILE,
+                """
+                [{"type":"DEVELOPMENT","title":"A","spec":"a","dependsOn":[]}]
+                """);
+
+        fireCompleted("s3");
+
+        // design 豁免；analysis 未跳过且未产出 → partial
+        assertEquals(1, notificationService.ofType("flow.plan.partial").size());
+        assertTrue(notificationService.ofType("flow.plan.partial").get(0).body()
+                .contains(FlowOutputContract.ANALYSIS_FILE));
+        assertTrue(!notificationService.ofType("flow.plan.partial").get(0).body()
+                .contains(FlowOutputContract.DESIGN_FILE));
+        assertEquals(0, sessionManager.requests.size());
+    }
+
     @Test
     void 规划入口_带用户建议拼入taskSpec() {
         requirementService.add("r1", RequirementEntity.STATUS_DRAFT);
