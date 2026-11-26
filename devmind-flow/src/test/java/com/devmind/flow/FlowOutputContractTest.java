@@ -59,35 +59,6 @@ class FlowOutputContractTest {
                 + FlowOutputContract.WI_PLAN_FILE + "`"));
     }
 
-    // ---------------- CAP-116：收窄范围编码进 taskSpec 第二行 ----------------
-
-    @Test
-    void 规划spec收窄时第二行编码跳过环节且可解析() {
-        String spec = FlowOutputContract.planSpec(req(), true, false);
-        String secondLine = spec.split("\n")[1];
-        assertTrue(secondLine.startsWith(FlowOutputContract.SCOPE_PREFIX));
-        assertTrue(FlowOutputContract.planSkips(spec, "analysis"));
-        assertFalse(FlowOutputContract.planSkips(spec, "design"));
-        // 开场白随范围变化，不再声称三份产出
-        assertFalse(spec.contains("分析、方案设计与工作单元拆分"));
-    }
-
-    @Test
-    void 规划spec全量时无skip行() {
-        String spec = FlowOutputContract.planSpec(req(), false, false);
-        assertFalse(spec.contains(FlowOutputContract.SCOPE_PREFIX));
-        assertFalse(FlowOutputContract.planSkips(spec, "analysis"));
-        assertFalse(FlowOutputContract.planSkips(spec, "design"));
-    }
-
-    @Test
-    void planSkips对非规划会话与空输入返回false() {
-        assertFalse(FlowOutputContract.planSkips(null, "analysis"));
-        assertFalse(FlowOutputContract.planSkips("", "analysis"));
-        assertFalse(FlowOutputContract.planSkips(
-                FlowOutputContract.MARKER_DEV + "\n[plan:skip analysis]", "analysis"));
-    }
-
     // ---------------- REQ-16：规划 spec 末尾追加用户补充建议 ----------------
 
     @Test

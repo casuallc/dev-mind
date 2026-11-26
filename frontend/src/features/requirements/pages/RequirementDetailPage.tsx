@@ -21,7 +21,6 @@ import {
   Modal,
   Space,
   Spin,
-  Switch,
   Table,
   Tabs,
   Tag,
@@ -188,9 +187,6 @@ export default function RequirementDetailPage() {
   // REQ-16 规划提交对话框：受控 Modal + 补充建议输入框（可空）
   const [planOpen, setPlanOpen] = useState(false)
   const [planSuggestion, setPlanSuggestion] = useState('')
-  // CAP-116 阶段开关：本次规划是否走需求分析/方案设计（默认都开；关闭只收窄当次产出，不改需求属性）
-  const [planWithAnalysis, setPlanWithAnalysis] = useState(true)
-  const [planWithDesign, setPlanWithDesign] = useState(true)
   // Tab 与 URL 同步（?tab=analysis/design/workItems）：流程通知深链直达对应 Tab，刷新/分享不丢位置
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = searchParams.get('tab') || 'analysis'
@@ -285,23 +281,16 @@ export default function RequirementDetailPage() {
     : []
 
   /** 起流程会话：规划/开发共用（成功后刷新 overview + 方案列表，会话状态进「会话」列与 Tab 标签）。
-   *  REQ-16/CAP-116：规划分支把补充建议与阶段开关透传给 flowPlan（均可省，省时与现状一致）。 */
-  const startFlow = async (kind: 'plan' | 'dev') => {
+   *  REQ-16：规划分支把用户补充建议透传给 flowPlan（可空，空时与现状一致）。 */
+  const startFlow = async (kind: 'plan' | 'dev', userSuggestion?: string) => {
     if (!projectId) return
     setFlowBusy(kind)
     try {
       const s = kind === 'plan'
-        ? await flowPlan(projectId, r.id, {
-            userSuggestion: planSuggestion,
-            withAnalysis: planWithAnalysis,
-            withDesign: planWithDesign,
-          })
+        ? await flowPlan(projectId, r.id, userSuggestion)
         : await flowDev(projectId, r.id)
-      const planStages = [planWithAnalysis && '分析', planWithDesign && '方案', '工作单元']
-        .filter(Boolean)
-        .join(' + ')
       message.success(kind === 'plan'
-        ? `规划会话已启动：产出${planStages}，完成后自动接开发会话`
+        ? '规划会话已启动：一个会话产出分析+方案+工作单元，完成后自动接开发会话'
         : '开发会话已启动：按工作单元清单一次做完')
       navigate(`/sessions?sid=${s.id}`)
     } catch (e) {
@@ -311,17 +300,15 @@ export default function RequirementDetailPage() {
     }
   }
 
-  /** REQ-16/CAP-116：开启/重新规划统一走受控 Modal（阶段开关 + 可填补充建议）；确认后关闭并起会话 */
+  /** REQ-16：开启/重新规划统一走受控 Modal（可填补充建议）；确认后关闭并起会话 */
   const confirmPlan = () => {
     setPlanSuggestion('')
-    setPlanWithAnalysis(true)
-    setPlanWithDesign(true)
     setPlanOpen(true)
   }
 
   const submitPlan = () => {
     setPlanOpen(false)
-    startFlow('plan')
+    startFlow('plan', planSuggestion)
   }
 
   const confirmDev = () => {
@@ -903,32 +890,10 @@ export default function RequirementDetailPage() {
       >
         {planned && (
           <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-            将重跑整个规划链路（按下方选择的阶段），新产出会落成分析/方案文档的新版本；
+            将重跑整个规划链路（分析 + 方案 + 工作单元），新产出会落成分析/方案文档的新版本；
             已有工作单元不会被删除。
           </Typography.Text>
         )}
-        {/* CAP-116：按次选择是否走分析/方案，默认都开；关闭只收窄当次产出，不改需求属性 */}
-        <Space direction="vertical" size={4} style={{ width: '100%', marginBottom: 12 }}>
-          <Space size={8}>
-            <Switch checked={planWithAnalysis} onChange={setPlanWithAnalysis} />
-            <span>需求分析</span>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              产出分析文档（影响面/复杂度/风险）
-            </Typography.Text>
-          </Space>
-          <Space size={8}>
-            <Switch checked={planWithDesign} onChange={setPlanWithDesign} />
-            <span>方案设计</span>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              产出方案文档（思路/数据模型/接口）
-            </Typography.Text>
-          </Space>
-          {(!planWithAnalysis || !planWithDesign) && (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              已关闭的阶段本次不再产出对应文档，规划完成后仍会自动拆分工作单元并接开发会话。
-            </Typography.Text>
-          )}
-        </Space>
         <Input.TextArea
           rows={4}
           maxLength={2000}

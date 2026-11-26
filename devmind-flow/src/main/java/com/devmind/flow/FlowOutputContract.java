@@ -33,13 +33,6 @@ public final class FlowOutputContract {
     /** CAP-52 taskSpec 首行标记：需求级开发会话（按清单一次做完） */
     public static final String MARKER_DEV = "[flow:dev]";
 
-    /**
-     * CAP-116 taskSpec 第二行（可选）：本次规划收窄的产出范围，形如 {@code [plan:skip analysis design]}。
-     * 只在有跳过环节时写入；产出分流据此豁免缺失判定（不依赖需求实体上的存量跳过标记，
-     * 会话行即当次范围的事实源）。
-     */
-    public static final String SCOPE_PREFIX = "[plan:skip";
-
     /** 注入 spec 的背景材料截断上限（防多份上游产出叠加膨胀 token） */
     static final int CONTEXT_TRUNCATE_CHARS = 4000;
 
@@ -92,9 +85,8 @@ public final class FlowOutputContract {
      * 只能把上游产出当字符串重塞进下游 spec，且每个会话都要重注入一遍知识库/skills/附件。
      * 合成一条对话上下文后，上游结论天然共享，注入与请求数都降到 1/N。</p>
      *
-     * @param skipAnalysis 跳过分析（存量实体标记或 CAP-116 本次关闭）→ 不要求该文件
-     *                     （产出范围收窄，不再是阶段门禁），并在 taskSpec 第二行编码 skip 标记
-     * @param skipDesign   跳过方案（同上）→ 不要求该文件
+     * @param skipAnalysis 存量「跳过分析」标记 → 不要求该文件（产出范围收窄，不再是阶段门禁）
+     * @param skipDesign   存量「跳过方案」标记 → 不要求该文件
      */
     public static String planSpec(RequirementEntity req, boolean skipAnalysis, boolean skipDesign) {
         return planSpec(req, skipAnalysis, skipDesign, null);
@@ -110,23 +102,8 @@ public final class FlowOutputContract {
                                   String userSuggestion) {
         StringBuilder sb = new StringBuilder();
         sb.append(MARKER_PLAN).append('\n');
-        // CAP-116：收窄产出范围时在第二行编码跳过环节，产出分流据此豁免缺失判定
-        if (skipAnalysis || skipDesign) {
-            sb.append(SCOPE_PREFIX)
-                    .append(skipAnalysis ? " analysis" : "")
-                    .append(skipDesign ? " design" : "")
-                    .append("]\n");
-        }
         sb.append("# 需求规划（REQ-").append(req.getSeq()).append(' ').append(req.getTitle()).append("）\n\n");
-        if (skipAnalysis && skipDesign) {
-            sb.append("请完成这个需求的**工作单元拆分**，产出写进约定文件。\n");
-        } else if (skipAnalysis || skipDesign) {
-            sb.append("请一次性完成这个需求的**").append(skipAnalysis ? "方案设计与工作单元拆分"
-                    : "分析与工作单元拆分").append("**，产出写进约定文件（本次不要求")
-                    .append(skipAnalysis ? "分析" : "方案设计").append("文档）。\n");
-        } else {
-            sb.append("请一次性完成这个需求的**分析、方案设计与工作单元拆分**，三份产出写进约定文件。\n");
-        }
+        sb.append("请一次性完成这个需求的**分析、方案设计与工作单元拆分**，三份产出写进约定文件。\n");
         sb.append("本次只做规划与拆分，**不要修改项目代码**。\n\n");
         sb.append("## 需求内容\n\n").append(nullToEmpty(req.getDescription())).append("\n\n");
         sb.append("## 输出要求\n\n");
@@ -160,7 +137,7 @@ public final class FlowOutputContract {
         sb.append("改哪些文件/模块、具体做什么、遵循的项目约定与命名、怎么算完成（验收标准：\n");
         sb.append("跑什么命令、看什么结果）。凡是本对话里已经确定的结论，都要落到 spec 文字里。\n\n");
         sb.append("示例：[{\"type\":\"DEVELOPMENT\",\"title\":\"...\",\"spec\":\"...\",\"dependsOn\":[]}]\n\n");
-        sb.append("完成后只输出上述产出范围内的文件到 `").append(OUTPUT_DIR)
+        sb.append("完成后只输出这三个（按上面的产出范围）文件到 `").append(OUTPUT_DIR)
                 .append("/`，不要修改项目代码。\n");
         String hint = sanitizeUserHint(userSuggestion);
         if (hint != null) {
@@ -169,24 +146,6 @@ public final class FlowOutputContract {
             sb.append(hint).append('\n');
         }
         return sb.toString();
-    }
-
-    /**
-     * CAP-116：本次规划会话是否声明跳过某环节（"analysis" / "design"）。
-     * 解析 taskSpec 第二行的 {@code [plan:skip ...]} 标记；非规划会话/无标记返回 false。
-     */
-    public static boolean planSkips(String taskSpec, String stage) {
-        if (taskSpec == null || !taskSpec.startsWith(MARKER_PLAN)) {
-            return false;
-        }
-        int firstNl = taskSpec.indexOf('\n');
-        if (firstNl < 0) {
-            return false;
-        }
-        int secondNl = taskSpec.indexOf('\n', firstNl + 1);
-        String second = secondNl < 0 ? taskSpec.substring(firstNl + 1)
-                : taskSpec.substring(firstNl + 1, secondNl);
-        return second.startsWith(SCOPE_PREFIX) && second.contains(stage);
     }
 
     /**

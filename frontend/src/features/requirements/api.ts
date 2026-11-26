@@ -355,22 +355,13 @@ export function importWiPlan(
 
 
 /** CAP-52 开启 AI 规划：一个会话产出 分析 + 方案 + 工作单元，三份齐备后自动起开发会话。
- *  REQ-16：userSuggestion 可空（服务端清洗后拼入规划 taskSpec 末尾）。
- *  CAP-116：withAnalysis/withDesign 缺省为开；传 false 本次规划不产出对应文档（不落需求实体）。
- *  无任何可传内容时保持原无 body POST（行为与现状一致）。 */
-export function flowPlan(
-  projectId: string,
-  requirementId: string,
-  opts?: { userSuggestion?: string; withAnalysis?: boolean; withDesign?: boolean },
-): Promise<FlowSession> {
-  const suggestion = opts?.userSuggestion?.trim()
-  const body: Record<string, unknown> = {}
-  if (suggestion) body.userSuggestion = suggestion
-  if (opts?.withAnalysis === false) body.withAnalysis = false
-  if (opts?.withDesign === false) body.withDesign = false
+ *  REQ-16：userSuggestion 可空——trim 后非空才带 body（服务端清洗后拼入规划 taskSpec 末尾），
+ *  否则保持原无 body POST（行为与现状一致）。 */
+export function flowPlan(projectId: string, requirementId: string, userSuggestion?: string): Promise<FlowSession> {
+  const suggestion = userSuggestion?.trim()
   return api.post<FlowSession>(
     `/projects/${projectId}/requirements/${requirementId}/flow/plan`,
-    Object.keys(body).length > 0 ? body : undefined,
+    suggestion ? { userSuggestion: suggestion } : undefined,
   )
 }
 

@@ -140,24 +140,13 @@ public class RequirementFlowService {
      * taskSpec 末尾并明确标注；null/空白时与两参版本输出完全一致（无回归）。
      */
     public SessionView startPlan(String projectId, String requirementId, String userSuggestion) {
-        return startPlan(projectId, requirementId, userSuggestion, null, null);
-    }
-
-    /**
-     * CAP-116 带阶段开关的规划入口：withAnalysis/withDesign 缺省（null）= 开启；关闭时本次
-     * 规划收窄产出范围（与存量实体跳过标记取「或」），跳过环节编码进 taskSpec 第二行
-     * （{@code [plan:skip ...]}），产出分流据此豁免缺失判定——不落需求实体。
-     */
-    public SessionView startPlan(String projectId, String requirementId, String userSuggestion,
-                                 Boolean withAnalysis, Boolean withDesign) {
         RequirementEntity req = requirementService.requireEntity(projectId, requirementId);
         requireNotTerminal(req, "发起规划");
         requireNoActiveSession(requirementId, "发起规划");
-        boolean skipAnalysis = req.getAnalysisSkipped() || Boolean.FALSE.equals(withAnalysis);
-        boolean skipDesign = req.getDesignSkipped() || Boolean.FALSE.equals(withDesign);
         SessionView session = sessionManager.create(new CreateSessionRequest(
                 null, projectId, null, requirementId,
-                FlowOutputContract.planSpec(req, skipAnalysis, skipDesign, userSuggestion),
+                FlowOutputContract.planSpec(req, req.getAnalysisSkipped(), req.getDesignSkipped(),
+                        userSuggestion),
                 null, null, null, null));
         if (RequirementEntity.STATUS_DRAFT.equals(req.getStatus())) {
             requirementService.updateStatus(projectId, requirementId, RequirementEntity.STATUS_ANALYZING);
@@ -550,14 +539,10 @@ public class RequirementFlowService {
     private void handlePlanOutput(SessionEntity session) {
         RequirementEntity req = requirementService.requireById(session.getRequirementId());
         List<String> missing = new ArrayList<>();
-        // 跳过的阶段不要求产出：存量实体标记 或 CAP-116 本次会话 taskSpec 声明的 skip
-        boolean skipAnalysis = req.getAnalysisSkipped()
-                || FlowOutputContract.planSkips(session.getTaskSpec(), "analysis");
-        boolean skipDesign = req.getDesignSkipped()
-                || FlowOutputContract.planSkips(session.getTaskSpec(), "design");
+        // 跳过的阶段不要求产出（存量标记 → 产出范围，不是门禁）
         String analysis = readOutput(session, FlowOutputContract.ANALYSIS_FILE);
         if (analysis == null) {
-            if (!skipAnalysis) {
+            if (!req.getAnalysisSkipped()) {
                 missing.add(FlowOutputContract.ANALYSIS_FILE);
             }
         } else {
@@ -570,7 +555,7 @@ public class RequirementFlowService {
         }
         String design = readOutput(session, FlowOutputContract.DESIGN_FILE);
         if (design == null) {
-            if (!skipDesign) {
+            if (!req.getDesignSkipped()) {
                 missing.add(FlowOutputContract.DESIGN_FILE);
             }
         } else {
