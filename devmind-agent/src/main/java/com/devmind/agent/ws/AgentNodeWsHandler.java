@@ -125,7 +125,12 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
                         frame.path("os").asText(null),
                         frame.path("capabilities").asText(null),
                         frame.path("version").asText(null),
-                        workspaceBytes, protocolVersion, labels, toolchainJson), active);
+                        workspaceBytes, protocolVersion, labels, toolchainJson,
+                        // 运行身份（可选字段，旧 runner 不上报即 null，落库不动旧值）
+                        frame.path("runUser").asText(null),
+                        frame.path("serviceMode").asText(null),
+                        frame.path("serviceName").asText(null),
+                        frame.path("workDir").asText(null)), active);
             }
             case "heartbeat" -> {
                 registry.touch(String.valueOf(node.getId()));

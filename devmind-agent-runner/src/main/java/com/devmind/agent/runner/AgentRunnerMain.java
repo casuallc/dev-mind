@@ -223,6 +223,11 @@ public class AgentRunnerMain {
             }, config.toolchainRefreshMinutes(), config.toolchainRefreshMinutes(), TimeUnit.MINUTES);
         }
 
+        // 运行身份探测（whoami/服务形态/服务名/工作目录），hello 上报供节点页「修改执行用户」引导
+        RuntimeIdentity identity = RuntimeIdentity.detect(config);
+        log.info("运行身份: user={} mode={} service={} workDir={}",
+                identity.runUser(), identity.serviceMode(), identity.serviceName(), identity.workDir());
+
         // CAP-70：出口隧道通道（独立于控制通道的专用 WS，二进制流帧；隧道 URL 由 serverUrl 换尾段推导）。
         // 与控制通道同一 token 认证；隧道断连不影响控制通道，重连自控
         TunnelConnection tunnel = new TunnelConnection(config, mapper);
@@ -232,7 +237,7 @@ public class AgentRunnerMain {
                         terminalHandler, fileHandler, worklogOutputCutoff, pendingLaunches, connRef[0],
                         tunnel),
                 () -> connRef[0].send(helloFrame(sessions, pendingLaunches, version, workspaceBytes.get(),
-                        config.labels(), toolchain.get())));
+                        config.labels(), toolchain.get(), identity)));
         connRef[0] = conn;
 
         ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -300,12 +305,28 @@ public class AgentRunnerMain {
     private static Map<String, Object> helloFrame(RunnerSessionRegistry sessions,
                                                   PendingLaunchRegistry pendingLaunches,
                                                   String version, long workspaceBytes,
-                                                  List<String> labels, Map<String, String> toolchain) {
+                                                  List<String> labels, Map<String, String> toolchain,
+                                                  RuntimeIdentity identity) {
         Map<String, Object> hello = new LinkedHashMap<>();
         hello.put("type", "hello");
         hello.put("os", System.getProperty("os.name") + " / " + System.getProperty("os.arch"));
         hello.put("capabilities", "claude");
         hello.put("version", version);
+        // 运行身份（空项不报 = 服务端不动旧值，同 workspaceBytes 缺字段惯例）
+        if (identity != null) {
+            if (!identity.runUser().isEmpty()) {
+                hello.put("runUser", identity.runUser());
+            }
+            if (!identity.serviceMode().isEmpty()) {
+                hello.put("serviceMode", identity.serviceMode());
+            }
+            if (!identity.serviceName().isEmpty()) {
+                hello.put("serviceName", identity.serviceName());
+            }
+            if (!identity.workDir().isEmpty()) {
+                hello.put("workDir", identity.workDir());
+            }
+        }
         // 存活清单 = 已拉起 + 准备中（受理未拉起）：准备中的会话若缺席，服务端 hello 对账会误判 FAILED
         List<String> active = new ArrayList<>(sessions.activeSessionIds());
         active.addAll(pendingLaunches.ids());

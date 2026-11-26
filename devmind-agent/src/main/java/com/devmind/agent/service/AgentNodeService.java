@@ -159,6 +159,19 @@ public class AgentNodeService {
             if (meta.toolchainJson() != null) {
                 e.setToolchain(meta.toolchainJson());
             }
+            // 运行身份：空串按未上报对待（不动旧值）
+            if (meta.runUser() != null && !meta.runUser().isBlank()) {
+                e.setRunUser(meta.runUser());
+            }
+            if (meta.serviceMode() != null && !meta.serviceMode().isBlank()) {
+                e.setServiceMode(meta.serviceMode());
+            }
+            if (meta.serviceName() != null && !meta.serviceName().isBlank()) {
+                e.setServiceName(meta.serviceName());
+            }
+            if (meta.workDir() != null && !meta.workDir().isBlank()) {
+                e.setWorkDir(meta.workDir());
+            }
             e.setLastHeartbeatAt(Instant.now());
             repo.save(e);
         });

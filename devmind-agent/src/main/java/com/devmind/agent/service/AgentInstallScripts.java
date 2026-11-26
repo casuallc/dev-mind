@@ -185,6 +185,8 @@ if ($NoService) {
   <workingdirectory>$(& $esc $InstallDir)</workingdirectory>
   <!-- 服务管理模式标记:runner 升级换包后以退出码 42 退出,由本服务 onfailure 拉起新 jar -->
   <env name="DEVMIND_RUNNER_SERVICE" value="1"/>
+  <!-- 运行身份上报:节点页「修改执行用户」引导按服务名生成命令 -->
+  <env name="DEVMIND_RUNNER_SERVICE_NAME" value="$(& $esc $ServiceName)"/>
   <logpath>$(& $esc $logDir)</logpath>
   <logmode>roll</logmode>
   <onfailure action="restart" delay="5 sec"/>
@@ -304,6 +306,8 @@ WorkingDirectory=$INSTALL_DIR
 # 服务管理模式标记:runner 升级换包后以退出码 42 退出,由本 unit 的 on-failure 拉起新 jar,
 # SelfUpdater 不自行 spawn(防与 systemd 双份起进程)
 Environment=DEVMIND_RUNNER_SERVICE=1
+# 运行身份上报:节点页「修改执行用户」引导按 unit 名生成命令
+Environment=DEVMIND_RUNNER_SERVICE_NAME=devmind-agent
 ExecStart=$JAVA_BIN -jar $INSTALL_DIR/devmind-agent-runner.jar $INSTALL_DIR/agent.properties
 Restart=on-failure
 RestartSec=5

@@ -28,6 +28,15 @@ export interface AgentNode {
   fileRoots?: string[]
   /** 节点级环境变量（CAP-106；明文，禁存密钥；执行下发时作 env 合并最低优先基底） */
   env?: Record<string, string>
+  /** runner 运行身份（hello 上报；旧 runner 未上报为 undefined） */
+  /** 节点侧 OS 用户（whoami 结果，如 NT AUTHORITY\SYSTEM / root） */
+  runUser?: string
+  /** 托管形态：windows-service / systemd / process（裸进程或未知） */
+  serviceMode?: string
+  /** 服务/unit 名（未上报为 undefined，引导命令用占位符） */
+  serviceName?: string
+  /** runner 进程工作目录 */
+  workDir?: string
   /** 活跃会话数（列表接口聚合各会话模块 SPI 填充；RUNNING/WAITING_INPUT/WAITING_AUTH 三态） */
   activeSessionCount?: number
   lastHeartbeatAt?: string

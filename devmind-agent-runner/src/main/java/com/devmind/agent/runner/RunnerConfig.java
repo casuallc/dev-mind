@@ -85,6 +85,9 @@ import java.util.Properties;
  *                            # 由 ScanToolResolver 独立解析（不进本 record）。exec 帧 env 带
  *                            # DEVMIND_SCAN_ENGINE 时 prepend PATH；未配置按 where/which 探测，
  *                            # 探测不到该引擎步骤失败。改后须重启 runner 生效
+ * serviceName=               # runner 服务名（Windows 服务 / systemd unit），hello 上报供节点页
+ *                            # 「修改执行用户」引导预填命令；env DEVMIND_RUNNER_SERVICE_NAME 优先。
+ *                            # 一键安装脚本经 env 注入，手工安装可在此配置
  * </pre>
  */
 public record RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -98,7 +101,28 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                            int terminalShellIdleMin, boolean insecure,
                            boolean gitProxyEnabled, int gitProxyPort,
                            Map<String, String> toolchainPaths, int toolchainRefreshMinutes,
-                           java.util.List<String> terminalWriteAllowlist) {
+                           java.util.List<String> terminalWriteAllowlist, String serviceName) {
+
+    /** 兼容构造（运行身份上报前的 30 参签名）：服务名缺省空（仅 env 注入路径生效）。 */
+    public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
+                        Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
+                        String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
+                        int gcInitialDelayMinutes, java.util.List<String> labels,
+                        java.util.List<String> execAllowlist, String execShell, int buildGcHours,
+                        String claudeConfigDir, String worklogRoot, boolean partialMessages,
+                        int worktreeGcDays, java.util.List<String> terminalAllowlist,
+                        int terminalTimeoutSec, boolean terminalAllowRedirect,
+                        int terminalShellIdleMin, boolean insecure,
+                        boolean gitProxyEnabled, int gitProxyPort,
+                        Map<String, String> toolchainPaths, int toolchainRefreshMinutes,
+                        java.util.List<String> terminalWriteAllowlist) {
+        this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
+                executor, workspaceRoot, gcDays, gcIntervalMinutes, gcInitialDelayMinutes, labels,
+                execAllowlist, execShell, buildGcHours, claudeConfigDir, worklogRoot, partialMessages,
+                worktreeGcDays, terminalAllowlist, terminalTimeoutSec, terminalAllowRedirect,
+                terminalShellIdleMin, insecure, gitProxyEnabled, gitProxyPort, toolchainPaths,
+                toolchainRefreshMinutes, terminalWriteAllowlist, "");
+    }
 
     /** 兼容构造（CAP-115 M2 前的 29 参签名）：终端写档白名单缺省（null = 内置写档）。 */
     public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -306,7 +330,8 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                 Integer.parseInt(p.getProperty("toolchainRefreshMinutes", "10").strip()),
                 // CAP-115 M2：缺省（属性缺席）= null → TerminalHandler 用内置写档；显式配置全覆盖
                 p.getProperty("terminalWriteAllowlist") == null ? null
-                        : parseLabels(p.getProperty("terminalWriteAllowlist")));
+                        : parseLabels(p.getProperty("terminalWriteAllowlist")),
+                p.getProperty("serviceName", "").strip());
     }
 
     /** CAP-41：worklog 持久工作区根目录——配置优先，空 = {user.home}/worklog。 */

@@ -78,6 +78,22 @@ public class AgentNodeEntity {
     @Column(name = "last_heartbeat_at")
     private Instant lastHeartbeatAt;
 
+    /** runner 运行身份：节点侧 OS 用户（hello 上报的 whoami 结果，如 "NT AUTHORITY\SYSTEM" / "root"） */
+    @Column(name = "run_user", length = 128)
+    private String runUser;
+
+    /** runner 托管形态：windows-service / systemd / process（裸进程或未知） */
+    @Column(name = "service_mode", length = 32)
+    private String serviceMode;
+
+    /** 服务名（Windows 服务 / systemd unit；未上报为 null，引导命令用占位符） */
+    @Column(name = "service_name", length = 128)
+    private String serviceName;
+
+    /** runner 进程工作目录（引导命令预填路径用） */
+    @Column(name = "work_dir", length = 512)
+    private String workDir;
+
     /** 最近一次接入的远端地址（IP:端口，WS 连接建立时记录，离线后保留便于排查来源） */
     @Column(name = "remote_addr", length = 64)
     private String remoteAddr;
@@ -122,6 +138,14 @@ public class AgentNodeEntity {
     public void setEnvJson(String envJson) { this.envJson = envJson; }
     public Instant getLastHeartbeatAt() { return lastHeartbeatAt; }
     public void setLastHeartbeatAt(Instant lastHeartbeatAt) { this.lastHeartbeatAt = lastHeartbeatAt; }
+    public String getRunUser() { return runUser; }
+    public void setRunUser(String runUser) { this.runUser = runUser; }
+    public String getServiceMode() { return serviceMode; }
+    public void setServiceMode(String serviceMode) { this.serviceMode = serviceMode; }
+    public String getServiceName() { return serviceName; }
+    public void setServiceName(String serviceName) { this.serviceName = serviceName; }
+    public String getWorkDir() { return workDir; }
+    public void setWorkDir(String workDir) { this.workDir = workDir; }
     public String getRemoteAddr() { return remoteAddr; }
     public void setRemoteAddr(String remoteAddr) { this.remoteAddr = remoteAddr; }
     public boolean isDefault() { return isDefault; }

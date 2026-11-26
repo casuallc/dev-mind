@@ -41,6 +41,7 @@ import {
 } from '../api'
 import type { AgentNode, NodeActiveSession, RunnerPackage } from '../types'
 import ActiveSessionsCard, { activeSessionColumns } from '../components/ActiveSessionsCard'
+import RunIdentityCard, { serviceModeLabel } from '../components/RunIdentityCard'
 import { installOneLiner } from '../utils/installScript'
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
@@ -383,6 +384,23 @@ export default function AgentNodeDetailPage() {
                     <Tag color={statusColor[node.status] ?? 'default'}>{node.status}</Tag>
                   </Descriptions.Item>
                   <Descriptions.Item label="系统">{node.os || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="运行身份">
+                    {node.runUser ? (
+                      <Space size={4}>
+                        <Typography.Text code style={{ fontSize: 12 }}>{node.runUser}</Typography.Text>
+                        <Tag style={{ marginInlineEnd: 0 }}>{serviceModeLabel(node.serviceMode)}</Tag>
+                      </Space>
+                    ) : (
+                      <Tooltip title="该节点 runner 版本过旧未上报运行身份，升级后可见">
+                        <Typography.Text type="secondary">-（未上报）</Typography.Text>
+                      </Tooltip>
+                    )}
+                  </Descriptions.Item>
+                  {node.workDir && (
+                    <Descriptions.Item label="工作目录" span={2}>
+                      <Typography.Text code style={{ fontSize: 12 }}>{node.workDir}</Typography.Text>
+                    </Descriptions.Item>
+                  )}
                   <Descriptions.Item label="来源地址">
                     {node.remoteAddr ? <Typography.Text code>{node.remoteAddr}</Typography.Text> : '-'}
                   </Descriptions.Item>
@@ -426,6 +444,8 @@ export default function AgentNodeDetailPage() {
           ) : (
             <div style={pagePaneScrollStyle}>
               <Space direction="vertical" style={{ width: '100%' }} size={16}>
+                <RunIdentityCard node={node} />
+
                 <Card size="small" title="标签（调度）">
                   <Space direction="vertical" style={{ width: '100%' }} size={8}>
                     <Typography.Text type="secondary">

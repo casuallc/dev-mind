@@ -196,6 +196,24 @@ export default function AgentNodesPage() {
     },
     { title: '系统', dataIndex: 'os', width: 180, render: (s?: string) => s || '-' },
     {
+      title: '运行身份',
+      dataIndex: 'runUser',
+      width: 190,
+      render: (s: string | undefined, r: AgentNode) => {
+        if (!s) return '-'
+        const modeLabel =
+          r.serviceMode === 'windows-service' ? 'Windows 服务' : r.serviceMode === 'systemd' ? 'systemd' : '进程'
+        return (
+          <Tooltip title={`${modeLabel}${r.serviceName ? ` · ${r.serviceName}` : ''}（详情页可查看修改执行用户引导）`}>
+            <Space size={4}>
+              <Typography.Text code style={{ fontSize: 12 }}>{s}</Typography.Text>
+              <Tag style={{ marginInlineEnd: 0 }}>{modeLabel}</Tag>
+            </Space>
+          </Tooltip>
+        )
+      },
+    },
+    {
       title: '来源地址',
       dataIndex: 'remoteAddr',
       width: 150,

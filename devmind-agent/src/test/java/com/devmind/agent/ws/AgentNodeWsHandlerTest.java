@@ -38,6 +38,8 @@ class AgentNodeWsHandlerTest {
         handler.handleTextMessage(session, new TextMessage(
                 "{\"type\":\"hello\",\"os\":\"Windows 11 / amd64\",\"capabilities\":\"claude\","
                         + "\"version\":\"20260908.1\",\"protocolVersion\":2,\"workspaceBytes\":12345,"
+                        + "\"runUser\":\"NT AUTHORITY\\\\SYSTEM\",\"serviceMode\":\"windows-service\","
+                        + "\"serviceName\":\"devmind-agent\",\"workDir\":\"C:\\\\devmind-runner\","
                         + "\"activeSessions\":[\"s-1\"]}"));
         var captor = org.mockito.ArgumentCaptor.forClass(com.devmind.agent.dto.AgentHelloMeta.class);
         verify(registry).onHello(org.mockito.ArgumentMatchers.same(node), captor.capture(),
@@ -46,6 +48,11 @@ class AgentNodeWsHandlerTest {
         org.junit.jupiter.api.Assertions.assertEquals(2, meta.protocolVersion());
         org.junit.jupiter.api.Assertions.assertEquals(12345L, meta.workspaceBytes());
         org.junit.jupiter.api.Assertions.assertEquals("20260908.1", meta.runnerVersion());
+        // 运行身份字段
+        org.junit.jupiter.api.Assertions.assertEquals("NT AUTHORITY\\SYSTEM", meta.runUser());
+        org.junit.jupiter.api.Assertions.assertEquals("windows-service", meta.serviceMode());
+        org.junit.jupiter.api.Assertions.assertEquals("devmind-agent", meta.serviceName());
+        org.junit.jupiter.api.Assertions.assertEquals("C:\\devmind-runner", meta.workDir());
 
         // 老 runner：无新字段 → null（不动库内旧值）
         handler.handleTextMessage(session, new TextMessage(
@@ -55,6 +62,8 @@ class AgentNodeWsHandlerTest {
         var legacy = captor.getValue();
         org.junit.jupiter.api.Assertions.assertNull(legacy.protocolVersion());
         org.junit.jupiter.api.Assertions.assertNull(legacy.workspaceBytes());
+        org.junit.jupiter.api.Assertions.assertNull(legacy.runUser());
+        org.junit.jupiter.api.Assertions.assertNull(legacy.serviceMode());
     }
 
     @Test

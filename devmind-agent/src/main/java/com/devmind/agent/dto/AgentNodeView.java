@@ -15,6 +15,8 @@ import java.util.Map;
  * proxyUrl/proxyScopes = CAP-43 节点外网代理与生效范围 CSV；
  * fileRoots = CAP-65 文件访问根目录白名单（解析后列表，未配置为 null）；
  * env = CAP-106 节点级环境变量（明文，未配置为 null）；
+ * runUser/serviceMode/serviceName/workDir = runner 运行身份（hello 上报；旧 runner 未上报为 null，
+ * serviceMode ∈ windows-service / systemd / process），供「修改执行用户」引导；
  * activeSessionCount = 活跃会话数（由控制器聚合 AgentNodeSessionsProvider 填充，from 恒 null）。 */
 public record AgentNodeView(Long id, String name, String status, String os, String labels,
                             String capabilities, String runnerVersion, boolean isDefault,
@@ -22,6 +24,7 @@ public record AgentNodeView(Long id, String name, String status, String os, Stri
                             Long workspaceBytes, Integer protocolVersion, String toolchain,
                             String proxyUrl, String proxyScopes,
                             List<String> fileRoots, Map<String, String> env,
+                            String runUser, String serviceMode, String serviceName, String workDir,
                             Integer activeSessionCount) {
 
     public static AgentNodeView from(AgentNodeEntity e) {
@@ -31,13 +34,14 @@ public record AgentNodeView(Long id, String name, String status, String os, Stri
                 e.getCapabilities(), e.getRunnerVersion(), e.isDefault(), e.getRemoteAddr(),
                 e.getLastHeartbeatAt(), e.getCreatedAt(), e.getWorkspaceBytes(), e.getProtocolVersion(),
                 e.getToolchain(), e.getProxyUrl(), e.getProxyScopes(),
-                roots.isEmpty() ? null : roots, env.isEmpty() ? null : env, null);
+                roots.isEmpty() ? null : roots, env.isEmpty() ? null : env,
+                e.getRunUser(), e.getServiceMode(), e.getServiceName(), e.getWorkDir(), null);
     }
 
     /** 填充活跃会话数（列表接口在控制器层聚合会话 SPI 后调用）。 */
     public AgentNodeView withActiveSessionCount(Integer count) {
         return new AgentNodeView(id, name, status, os, labels, capabilities, runnerVersion, isDefault,
                 remoteAddr, lastHeartbeatAt, createdAt, workspaceBytes, protocolVersion, toolchain,
-                proxyUrl, proxyScopes, fileRoots, env, count);
+                proxyUrl, proxyScopes, fileRoots, env, runUser, serviceMode, serviceName, workDir, count);
     }
 }
