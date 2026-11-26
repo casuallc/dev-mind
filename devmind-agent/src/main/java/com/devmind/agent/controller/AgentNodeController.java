@@ -5,6 +5,7 @@ import com.devmind.agent.dto.AgentNodeView;
 import com.devmind.agent.dto.CreateAgentNodeRequest;
 import com.devmind.agent.dto.IssuedNodeView;
 import com.devmind.agent.dto.RunnerPackageView;
+import com.devmind.agent.dto.TunnelResetView;
 import com.devmind.agent.dto.UpgradeResultView;
 import com.devmind.agent.model.AgentAuditLogEntity;
 import com.devmind.agent.model.AgentNodeEntity;
@@ -255,6 +256,30 @@ public class AgentNodeController {
             return new UpgradeResultView("REJECTED", "升级过程中节点断线（可能正在重启，请稍后核对版本）", null);
         }
         return new UpgradeResultView("REJECTED", "节点拒绝升级: " + ack.reason(), null);
+    }
+
+    /**
+     * 隧道人工重建（协议 v27，出口规则面板「重建隧道」按钮）：隧道假死（节点在线但隧道
+     * 离线）时经主通道下发 tunnel_reset，runner 断开重连出口隧道。节点离线 409；
+     * runner 协议 <v27 不认识该帧会静默忽略，门控 409 引导升级 runner。
+     */
+    @PostMapping("/{id}/tunnel-reset")
+    public TunnelResetView tunnelReset(@PathVariable Long id) {
+        AgentNodeEntity node = service.require(id);
+        if (!registry.isOnline(String.valueOf(id))) {
+            throw new DevMindException(ErrorCode.CONFLICT, "节点不在线: " + node.getName());
+        }
+        int pv = node.getProtocolVersion() == null
+                ? com.devmind.common.agent.AgentProtocol.DEFAULT_WHEN_ABSENT : node.getProtocolVersion();
+        if (pv < com.devmind.common.agent.AgentProtocol.TUNNEL_RESET) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + node.getName() + " 的 runner 协议版本过低（隧道重建需 v"
+                            + com.devmind.common.agent.AgentProtocol.TUNNEL_RESET + "+，当前 v" + pv
+                            + "），请先升级 runner");
+        }
+        registry.sendTunnelReset(String.valueOf(id));
+        auditNode("TUNNEL_RESET", id, node.getName(), null);
+        return new TunnelResetView("ACCEPTED", "隧道重建指令已下发，数秒内自动重连");
     }
 
     /**

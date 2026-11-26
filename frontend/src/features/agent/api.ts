@@ -104,6 +104,11 @@ export function upgradeAgentNode(id: number, force = false): Promise<UpgradeResu
   return api.post<UpgradeResult>(`/agent-nodes/${id}/upgrade${force ? '?force=true' : ''}`)
 }
 
+/** 隧道人工重建（协议 v27+）：隧道假死时经主通道指令 runner 断开重连出口隧道 */
+export function resetNodeTunnel(id: number): Promise<{ status: string; message: string }> {
+  return api.post<{ status: string; message: string }>(`/agent-nodes/${id}/tunnel-reset`)
+}
+
 /** 节点上的活跃会话清单（强制升级前展示「会终止哪些会话」） */
 export function listNodeActiveSessions(id: number): Promise<NodeActiveSession[]> {
   return api.get<NodeActiveSession[]>(`/agent-nodes/${id}/active-sessions`)

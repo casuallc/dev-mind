@@ -85,6 +85,8 @@ public class TunnelConnection {
      * 与 {@link #heartbeatSeen} 区分：后者是心跳能力广告门，本字段只管「注册流量到底到没到」。
      */
     volatile boolean helloSeen;
+    /** 当前连接的 closed 闩锁（run() 建连后设置）；forceReconnect 靠它放行 run() 走重连；包内可见供测试 */
+    volatile CountDownLatch currentClosed;
     private final Map<Integer, RunnerTunnelStream> streams = new ConcurrentHashMap<>();
     private volatile boolean running = true;
 
@@ -125,6 +127,7 @@ public class TunnelConnection {
                 lastInboundAt.set(connectedAt);
                 heartbeatSeen = false;
                 helloSeen = false;
+                currentClosed = closed;
                 Thread.ofVirtual().name("tunnel-keepalive").start(() -> keepaliveLoop(ws, closed));
                 closed.await();
                 healthy = System.currentTimeMillis() - connectedAt >= ServerConnection.MIN_HEALTHY_MS;
@@ -298,6 +301,28 @@ public class TunnelConnection {
 
     private void abortAllStreams(String reason) {
         streams.values().forEach(s -> s.abort(reason));
+    }
+
+    /**
+     * 人工重建（tunnel_reset 指令，协议 v27+）：隧道假死场景主通道健康、隧道通道僵尸，
+     * 本方法是服务端经主通道伸过来的手——abort 当前连接并放行 closed 闩锁，
+     * {@link #run()} 随即走正常重连（等效于 keepalive 判定断链的路径，不区分假死形态）。
+     * 未连接时幂等空转（run() 本就在重连循环里）。
+     */
+    public void forceReconnect() {
+        WebSocket ws = current.get();
+        CountDownLatch closed = currentClosed;
+        if (ws == null || closed == null || closed.getCount() == 0) {
+            log.info("隧道当前未连接，重建指令空转（重连循环本就在跑）");
+            return;
+        }
+        log.info("收到隧道重建指令，主动断开当前连接并重连");
+        try {
+            ws.abort();
+        } catch (Exception e) {
+            log.debug("隧道 abort 异常（忽略，闩锁照放）: {}", e.getMessage());
+        }
+        closed.countDown(); // ws.abort() 实测不一定回调 listener，必须手动放行
     }
 
     public void shutdown() {

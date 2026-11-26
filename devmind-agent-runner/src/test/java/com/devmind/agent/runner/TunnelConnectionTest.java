@@ -254,6 +254,27 @@ class TunnelConnectionTest {
         t.join(5000);
     }
 
+    @Test
+    void forceReconnectAbortsAndReleasesClosedLatch() throws Exception {
+        // 人工重建（tunnel_reset，协议 v27）：abort 当前连接 + 放行 closed 闩锁，
+        // run() 走正常重连——隧道假死（hello 闸/心跳判定都盖不到的形态）的人工兜底
+        CountDownLatch closed = new CountDownLatch(1);
+        tunnel.currentClosed = closed;
+        tunnel.forceReconnect();
+        assertEquals(1, abortCount.get(), "重建应 abort 当前连接");
+        assertTrue(closed.await(1, TimeUnit.SECONDS),
+                "重建必须放行 closed 闩锁，否则 run() 挂在 await 上不重连");
+    }
+
+    @Test
+    void forceReconnectWithoutConnectionIsNoop() {
+        // 未连接时重建指令幂等空转（run() 本就在重连循环里），不得炸不得误 abort
+        tunnel.current.set(null);
+        tunnel.currentClosed = null;
+        tunnel.forceReconnect();
+        assertEquals(0, abortCount.get(), "未连接时不得 abort");
+    }
+
     private void awaitTrue(java.util.function.BooleanSupplier cond, long timeoutMs, String what)
             throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeoutMs;

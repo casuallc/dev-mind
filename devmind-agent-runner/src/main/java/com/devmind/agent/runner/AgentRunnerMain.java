@@ -223,16 +223,17 @@ public class AgentRunnerMain {
             }, config.toolchainRefreshMinutes(), config.toolchainRefreshMinutes(), TimeUnit.MINUTES);
         }
 
-        ServerConnection conn = new ServerConnection(config, mapper,
-                frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace,
-                        execHandler, verifyHandler, procHandler, pkgHandler, watcher, queryHandler,
-                        terminalHandler, fileHandler, worklogOutputCutoff, pendingLaunches, connRef[0]),
-                () -> connRef[0].send(helloFrame(sessions, pendingLaunches, version, workspaceBytes.get(),
-                        config.labels(), toolchain.get())));
-        connRef[0] = conn;
         // CAP-70：出口隧道通道（独立于控制通道的专用 WS，二进制流帧；隧道 URL 由 serverUrl 换尾段推导）。
         // 与控制通道同一 token 认证；隧道断连不影响控制通道，重连自控
         TunnelConnection tunnel = new TunnelConnection(config, mapper);
+        ServerConnection conn = new ServerConnection(config, mapper,
+                frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace,
+                        execHandler, verifyHandler, procHandler, pkgHandler, watcher, queryHandler,
+                        terminalHandler, fileHandler, worklogOutputCutoff, pendingLaunches, connRef[0],
+                        tunnel),
+                () -> connRef[0].send(helloFrame(sessions, pendingLaunches, version, workspaceBytes.get(),
+                        config.labels(), toolchain.get())));
+        connRef[0] = conn;
 
         ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "heartbeat");
@@ -351,7 +352,7 @@ public class AgentRunnerMain {
                                     FileHandler fileHandler,
                                     java.util.Map<String, java.time.Instant> worklogOutputCutoff,
                                     PendingLaunchRegistry pendingLaunches,
-                                    ServerConnection conn) {
+                                    ServerConnection conn, TunnelConnection tunnel) {
         // CAP-43：帧携带 proxy{url,scopes}（协议 v8+，节点配了外网代理才带）→ 刷新进程级
         // NodeProxy holder，git/claude/exec 三 scope 消费点直接读 holder；帧无此字段不动 holder
         // （权威源在服务端，四类消费帧都带同一值，重复刷新幂等）
@@ -401,6 +402,7 @@ public class AgentRunnerMain {
             case "terminal_complete" -> terminalHandler.handleComplete(frame); // CAP-59：Tab 补全
             case "terminal_cancel" -> terminalHandler.handleCancel(frame); // CAP-59：取消执行中命令
             case "file" -> fileHandler.handle(frame); // CAP-65：节点文件浏览（白名单内操作/中转）
+            case "tunnel_reset" -> tunnel.forceReconnect(); // 隧道人工重建（协议 v27，界面「重建隧道」）
             default -> log.debug("未知指令类型: {}", type);
         }
     }

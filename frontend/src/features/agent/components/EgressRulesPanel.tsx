@@ -11,6 +11,7 @@ import {
   Space,
   Switch,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
@@ -23,6 +24,7 @@ import {
   deleteEgressRule,
   listAgentNodes,
   listEgressRules,
+  resetNodeTunnel,
   updateEgressRule,
 } from '../api'
 import type { AgentNode, EgressRule, EgressRuleBody } from '../types'
@@ -30,6 +32,8 @@ import { usePermissions } from '../../auth/usePermissions'
 
 /** 隧道能力协议版本（AgentProtocol.EGRESS_TUNNEL）；低于此版本 runner 无隧道连接 */
 const TUNNEL_PROTOCOL = 21
+/** 隧道人工重建协议版本（AgentProtocol.TUNNEL_RESET）；低于此版本 runner 不认识 tunnel_reset 帧 */
+const TUNNEL_RESET_PROTOCOL = 27
 
 /**
  * CAP-70 FR-08 出口规则面板（节点页页签）：host glob 命中即经指定节点的反向隧道出访（服务端内嵌
@@ -45,6 +49,7 @@ export default function EgressRulesPanel() {
   const [loading, setLoading] = useState(false)
   const [editing, setEditing] = useState<EgressRule | 'new' | null>(null)
   const [saving, setSaving] = useState(false)
+  const [resetting, setResetting] = useState<number | null>(null)
   const [form] = Form.useForm<EgressRuleBody>()
 
   const load = useCallback(async () => {
@@ -145,11 +150,56 @@ export default function EgressRulesPanel() {
     })
   }
 
+  // 隧道人工重建（协议 v27）：隧道假死（节点在线但隧道离线）时经主通道指令 runner 断开重连
+  const confirmResetTunnel = (r: EgressRule) => {
+    Modal.confirm({
+      title: '重建隧道',
+      content: `向节点「${r.nodeName ?? `#${r.nodeId}`}」下发隧道重建指令：当前隧道连接将断开`
+        + '并自动重连（进行中的隧道流量会中断，由调用方重试），数秒内恢复。确认继续？',
+      okText: '重建',
+      cancelText: '取消',
+      onOk: async () => {
+        setResetting(r.nodeId)
+        try {
+          const res = await resetNodeTunnel(r.nodeId)
+          message.success(res.message || '重建指令已下发')
+          window.setTimeout(() => void load(), 4000) // 重连需几秒，延迟刷新看结果
+        } catch (e) {
+          message.error(e instanceof Error ? e.message : '重建失败')
+        } finally {
+          setResetting(null)
+        }
+      },
+    })
+  }
+
   const tunnelBadge = (r: EgressRule) => {
     if (r.tunnelOnline == null) {
       return <Tag>无隧道</Tag>
     }
-    return r.tunnelOnline ? <Tag color="success">隧道在线</Tag> : <Tag color="error">隧道离线</Tag>
+    const badge = r.tunnelOnline ? <Tag color="success">隧道在线</Tag> : <Tag color="error">隧道离线</Tag>
+    if (!canManage) {
+      return badge
+    }
+    const pv = r.nodeProtocolVersion ?? 1
+    const supported = pv >= TUNNEL_RESET_PROTOCOL
+    const btn = (
+      // 灰按钮 Tooltip 要套 span（disabled 按钮不冒泡鼠标事件）
+      <Tooltip title={supported ? undefined : `runner 协议 v${pv} 不支持隧道重建，请先升级 runner`}>
+        <span>
+          <Button
+            size="small"
+            type="link"
+            disabled={!supported}
+            loading={resetting === r.nodeId}
+            onClick={() => confirmResetTunnel(r)}
+          >
+            重建
+          </Button>
+        </span>
+      </Tooltip>
+    )
+    return <Space size={0}>{badge}{btn}</Space>
   }
 
   const columns = [
@@ -158,7 +208,7 @@ export default function EgressRulesPanel() {
     {
       title: '隧道',
       key: 'tunnel',
-      width: 100,
+      width: 160,
       render: (_: unknown, r: EgressRule) => tunnelBadge(r),
     },
     {

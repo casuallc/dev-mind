@@ -847,6 +847,18 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     }
 
     /**
+     * 隧道人工重建（协议 v27，界面「重建隧道」按钮）：隧道假死时隧道通道僵尸但主通道
+     * 健康，经主通道下发 tunnel_reset 指令 runner 断开重连出口隧道。fire-and-forget
+     * （runner 重连结果看隧道注册表，无需同步 ack）。协议门控在控制器层（409 引导升级）。
+     */
+    public void sendTunnelReset(String nodeId) {
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "tunnel_reset");
+        send(requireConnection(nodeId), frame);
+        auditCommand("TUNNEL_RESET", nodeId, null, true, System.currentTimeMillis(), null);
+    }
+
+    /**
      * CAP-36：下发 exec 帧并阻塞至 exec_exit（镜像 launch 的「发帧 + 等 ack」模式）。
      * 协议门控：runner 低于 v3 直接 409 提示升级；等待上限 = 步骤超时 + 120s 余量
      * （runner 侧超时 kill 后仍会回 exec_exit，这里只兜 runner 无响应）。

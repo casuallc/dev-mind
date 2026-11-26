@@ -84,12 +84,13 @@ package com.devmind.common.agent;
      * 请求 runner 幂等物化 worktrees/term-<id> 键控工作区并回 ack{path,branch}；
      * 老 runner 不认识该帧会静默忽略，服务端空等超时，故属「必须认识」需门控，409
      * 话术引导升级 runner。M2 追加 workspace_file_write 帧（终端工作区文件直写：
-     * path/contentBase64/expectedSha，ack{ok,sha} 或 409 sha 不符），同帧同门控）。</p>
+     * path/contentBase64/expectedSha，ack{ok,sha} 或 409 sha 不符），同帧同门控）。
+     * v27 = 隧道人工重建（tunnel_reset 帧，老 runner 静默忽略故门控，见 {@link #TUNNEL_RESET}）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 26;
+    public static final int CURRENT = 27;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -180,6 +181,13 @@ public final class AgentProtocol {
 
     /** CAP-115 M2 终端工作区文件直写（workspace_file_write/workspace_file_write_ack 帧）所需最低版本（同 v26 门控） */
     public static final int WORKSPACE_FILE_WRITE = 26;
+
+    /**
+     * 隧道人工重建（tunnel_reset 帧：隧道假死时经健康的主通道指令 runner 断开重连
+     * 出口隧道，界面「重建隧道」按钮的下发链路）所需最低版本；老 runner 静默忽略
+     * 该帧 = 界面点了没反应，故门控 409 引导升级 runner。
+     */
+    public static final int TUNNEL_RESET = 27;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;
